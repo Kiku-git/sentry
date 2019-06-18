@@ -1,13 +1,13 @@
 from __future__ import absolute_import
 
-from collections import Mapping, OrderedDict
+
+from collections import OrderedDict
 import logging
 import six
 
 from django.conf import settings
 from django.utils.translation import ugettext as _
 
-from sentry.models.eventerror import EventError
 from sentry.utils.canonical import get_canonical_name
 from sentry.utils.html import escape
 from sentry.utils.imports import import_string
@@ -88,6 +88,7 @@ class Interface(object):
     score = 0
     display_score = None
     ephemeral = False
+    grouping_variants = ['default']
 
     def __init__(self, **data):
         self._data = data or {}
@@ -136,86 +137,18 @@ class Interface(object):
         """
         return cls(**data) if data is not None else None
 
-    @classmethod
-    def _normalize(cls, data, meta):
-        """Custom interface normalization. ``data`` is guaranteed to be a
-        non-empty mapping. Return ``None`` for invalid data.
-        """
-        return cls.to_python(data).to_json()
+    def get_raw_data(self):
+        """Returns the underlying raw data."""
+        return self._data
 
-    @classmethod
-    def normalize(cls, data, meta):
-        """Normalizes the given raw data removing or replacing all invalid
-        attributes. If the interface is unprocessable, ``None`` is returned
-        instead.
-
-        Errors are written to the ``meta`` container. Use ``Meta.enter(key)`` to
-        obtain an instance.
-
-        TEMPORARY: The transitional default behavior is to call to_python and
-        catch exceptions into meta data. To migrate, override ``_normalize``.
-        """
-
-        # Gracefully skip empty data. We treat ``None`` and empty objects the
-        # same as missing data. If there are meta errors attached already, they
-        # will remain in meta.
-        if not data:
-            return None
-
-        # Interface data is required to be a JSON object. Places where the
-        # protocol permits lists must be casted to a values wrapper first.
-        if not isinstance(data, Mapping):
-            meta.add_error(EventError.INVALID_DATA, data, {
-                'reason': 'expected %s' % (cls.__name__,),
-            })
-            return None
-
-        try:
-            data = cls._normalize(data, meta=meta)
-        except Exception as e:
-            # XXX: InterfaceValidationErrors can be thrown in the transitional
-            # phase while to_python is being used for normalization. All other
-            # exceptions indicate a programming error and need to be reported.
-            if not isinstance(e, InterfaceValidationError):
-                interface_logger.error('Discarded invalid value for interface: %s (%r)',
-                                       cls.path, data, exc_info=True)
-
-            meta.add_error(EventError.INVALID_DATA, data, {
-                'reason': six.text_type(e)
-            })
-            return None
-
-        # As with input data, empty interface data is coerced to None after
-        # normalization.
-        return data or None
-
-    def get_api_context(self, is_public=False):
+    def get_api_context(self, is_public=False, platform=None):
         return self.to_json()
 
-    def get_api_meta(self, meta, is_public=False):
+    def get_api_meta(self, meta, is_public=False, platform=None):
         return meta
 
     def to_json(self):
         return prune_empty_keys(self._data)
-
-    def get_hash(self, platform=None, variant='system'):
-        return []
-
-    def get_hashes(self, platform=None):
-        system_hash = self.get_hash(platform, variant='system')
-        if not system_hash:
-            return {}
-
-        hashes = {'system': system_hash}
-
-        app_hash = self.get_hash(platform, variant='app')
-        if system_hash != app_hash and app_hash:
-            hashes['app'] = app_hash
-
-        return hashes
-
-    def compute_hashes(self, platform=None):
-        return self.get_hashes(platform).values()
 
     def get_title(self):
         return _(type(self).__name__)

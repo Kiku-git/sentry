@@ -5,7 +5,7 @@ import moment from 'moment-timezone';
 
 import SentryTypes from 'app/sentryTypes';
 import Button from 'app/components/button';
-import Link from 'app/components/link';
+import Link from 'app/components/links/link';
 import {t} from 'app/locale';
 import TextOverflow from 'app/components/textOverflow';
 import DynamicWrapper from 'app/components/dynamicWrapper';
@@ -22,11 +22,11 @@ export default class Deploys extends React.Component {
   render() {
     const {project, organization} = this.props;
 
-    const flattenedDeploys = Object.entries(
-      project.latestDeploys || {}
-    ).map(([environment, value]) => {
-      return {environment, ...value};
-    });
+    const flattenedDeploys = Object.entries(project.latestDeploys || {}).map(
+      ([environment, value]) => {
+        return {environment, ...value};
+      }
+    );
 
     const deploys = (flattenedDeploys || [])
       .sort((a, b) => new Date(b.dateFinished) - new Date(a.dateFinished))
@@ -61,18 +61,14 @@ class Deploy extends React.Component {
   render() {
     const {deploy, organization, project} = this.props;
 
-    const hasSentry10 = new Set(organization.features).has('sentry10');
-
     return (
       <DeployRow justify="space-between">
         <Environment>{deploy.environment}</Environment>
         <Version>
           <StyledLink
-            to={
-              hasSentry10
-                ? `/organizations/${organization.slug}/releases/${deploy.version}/?project=${project.id}`
-                : `/${organization.slug}/${project.slug}/releases/${deploy.version}/`
-            }
+            to={`/organizations/${organization.slug}/releases/${
+              deploy.version
+            }/?project=${project.id}`}
           >
             {getShortVersion(deploy.version)}
           </StyledLink>

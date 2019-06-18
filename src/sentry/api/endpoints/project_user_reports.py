@@ -135,6 +135,8 @@ class ProjectUserReportsEndpoint(ProjectEndpoint, EnvironmentMixin):
             return self.respond(serializer.errors, status=400)
 
         report = serializer.object
+        # XXX(dcramer): enforce case insensitivty by coercing this to a lowercase string
+        report.event_id = report.event_id.lower()
         report.project = project
 
         # TODO(dcramer): we should probably create the user if they dont
@@ -145,10 +147,7 @@ class ProjectUserReportsEndpoint(ProjectEndpoint, EnvironmentMixin):
         if euser:
             report.event_user_id = euser.id
 
-        event = Event.objects.filter(
-            project_id=project.id,
-            event_id=report.event_id,
-        ).first()
+        event = Event.objects.from_event_id(report.event_id, project.id)
         if not event:
             try:
                 report.group = Group.objects.from_event_id(project, report.event_id)

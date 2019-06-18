@@ -101,6 +101,7 @@ class SecurityReport(Interface):
 
     @classmethod
     def to_python(cls, data):
+        # TODO(markus): semaphore does not validate security interfaces yet
         is_valid, errors = validate_and_default_interface(data, cls.path)
         if not is_valid:
             raise InterfaceValidationError("Invalid interface data")
@@ -171,11 +172,6 @@ class Hpkp(SecurityReport):
     def get_culprit(self):
         return None
 
-    def get_hash(self, platform=None, variant='system'):
-        if variant != 'system':
-            return []
-        return ['hpkp', self.hostname]
-
     def get_message(self):
         return u"Public key pinning validation failed for '{self.hostname}'".format(self=self)
 
@@ -237,11 +233,6 @@ class ExpectStaple(SecurityReport):
     def get_culprit(self):
         return self.hostname
 
-    def get_hash(self, platform=None, variant='system'):
-        if variant != 'system':
-            return []
-        return ['expect-staple', self.hostname]
-
     def get_message(self):
         return u"Expect-Staple failed for '{self.hostname}'".format(self=self)
 
@@ -301,11 +292,6 @@ class ExpectCT(SecurityReport):
     def get_culprit(self):
         return self.hostname
 
-    def get_hash(self, platform=None, variant='system'):
-        if variant != 'system':
-            return []
-        return ['expect-ct', self.hostname]
-
     def get_message(self):
         return u"Expect-CT failed for '{self.hostname}'".format(self=self)
 
@@ -348,6 +334,17 @@ class Csp(SecurityReport):
 
     @classmethod
     def from_raw(cls, raw):
+        # Firefox doesn't send effective-directive, so parse it from
+        # violated-directive but prefer effective-directive when present
+        #
+        # refs: https://bugzil.la/1192684#c8
+        try:
+            report = raw['csp-report']
+            report['effective-directive'] = report.get('effective-directive',
+                                                       report['violated-directive'].split(None, 1)[0])
+        except (KeyError, IndexError):
+            pass
+
         # Validate the raw data against the input schema (raises on failure)
         schema = INPUT_SCHEMAS[cls.path]
         jsonschema.validate(raw, schema)
@@ -358,16 +355,6 @@ class Csp(SecurityReport):
         kwargs = {k.replace('-', '_'): trim(v, 1024) for k, v in six.iteritems(raw)}
 
         return cls.to_python(kwargs)
-
-    def get_hash(self, platform=None, variant='system'):
-        if variant != 'system':
-            return []
-        if self._local_script_violation_type:
-            uri = "'%s'" % self._local_script_violation_type
-        else:
-            uri = self._normalized_blocked_uri
-
-        return [self.effective_directive, uri]
 
     def get_message(self):
         templates = {
@@ -390,8 +377,8 @@ class Csp(SecurityReport):
         }
         default_template = ('Blocked {directive!r} from {uri!r}', 'Blocked inline {directive!r}')
 
-        directive = self._local_script_violation_type or self.effective_directive
-        uri = self._normalized_blocked_uri
+        directive = self.local_script_violation_type or self.effective_directive
+        uri = self.normalized_blocked_uri
         index = 1 if uri == self.LOCAL else 0
 
         try:
@@ -461,7 +448,7 @@ class Csp(SecurityReport):
         return uri
 
     @memoize
-    def _normalized_blocked_uri(self):
+    def normalized_blocked_uri(self):
         return self._normalize_uri(self.blocked_uri)
 
     @memoize
@@ -508,13 +495,13 @@ class Csp(SecurityReport):
         return self._unsplit(scheme, value)
 
     @memoize
-    def _local_script_violation_type(self):
+    def local_script_violation_type(self):
         """
         If this is a locally-sourced script-src error, gives the type.
         """
         if (self.violated_directive
                 and self.effective_directive == 'script-src'
-                and self._normalized_blocked_uri == self.LOCAL):
+                and self.normalized_blocked_uri == self.LOCAL):
             if "'unsafe-inline'" in self.violated_directive:
                 return "unsafe-inline"
             elif "'unsafe-eval'" in self.violated_directive:

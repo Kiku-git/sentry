@@ -1,5 +1,8 @@
 import $ from 'jquery';
 import {ThemeProvider} from 'emotion-theming';
+import {Tracing} from '@sentry/integrations';
+import {getCurrentHub} from '@sentry/browser';
+import {injectGlobal} from 'emotion';
 import Cookies from 'js-cookie';
 import PropTypes from 'prop-types';
 import React from 'react';
@@ -11,19 +14,19 @@ import {openCommandPalette} from 'app/actionCreators/modal';
 import {t} from 'app/locale';
 import AlertActions from 'app/actions/alertActions';
 import Alerts from 'app/components/alerts';
-import ApiMixin from 'app/mixins/apiMixin';
 import AssistantHelper from 'app/components/assistant/helper';
 import ConfigStore from 'app/stores/configStore';
 import ErrorBoundary from 'app/components/errorBoundary';
 import GlobalModal from 'app/components/globalModal';
+import HookStore from 'app/stores/hookStore';
 import Indicators from 'app/components/indicators';
 import InstallWizard from 'app/views/installWizard';
 import LoadingIndicator from 'app/components/loadingIndicator';
 import NewsletterConsent from 'app/views/newsletterConsent';
 import OrganizationsStore from 'app/stores/organizationsStore';
-import theme from 'app/utils/theme';
 import getRouteStringFromRoutes from 'app/utils/getRouteStringFromRoutes';
-import * as tracing from 'app/utils/tracing';
+import theme from 'app/utils/theme';
+import withApi from 'app/utils/withApi';
 
 function getAlertTypeForProblem(problem) {
   switch (problem.severity) {
@@ -38,6 +41,7 @@ const App = createReactClass({
   displayName: 'App',
 
   propTypes: {
+    api: PropTypes.object.isRequired,
     routes: PropTypes.array,
   },
 
@@ -45,7 +49,7 @@ const App = createReactClass({
     location: PropTypes.object,
   },
 
-  mixins: [ApiMixin, Reflux.listenTo(ConfigStore, 'onConfigStoreChange')],
+  mixins: [Reflux.listenTo(ConfigStore, 'onConfigStoreChange')],
 
   getInitialState() {
     const user = ConfigStore.get('user');
@@ -64,7 +68,7 @@ const App = createReactClass({
   },
 
   componentWillMount() {
-    this.api.request('/organizations/', {
+    this.props.api.request('/organizations/', {
       query: {
         member: '1',
       },
@@ -82,7 +86,7 @@ const App = createReactClass({
       },
     });
 
-    this.api.request('/internal/health/', {
+    this.props.api.request('/internal/health/', {
       success: data => {
         if (data && data.problems) {
           data.problems.forEach(problem => {
@@ -111,14 +115,18 @@ const App = createReactClass({
       const pageAllowsAnon = /^\/share\//.test(window.location.pathname);
 
       // Ignore error unless it is a 401
-      if (!jqXHR || jqXHR.status !== 401 || pageAllowsAnon) return;
+      if (!jqXHR || jqXHR.status !== 401 || pageAllowsAnon) {
+        return;
+      }
 
       const code = jqXHR?.responseJSON?.detail?.code;
       const extra = jqXHR?.responseJSON?.detail?.extra;
 
       // 401s can also mean sudo is required or it's a request that is allowed to fail
       // Ignore if these are the cases
-      if (code === 'sudo-required' || code === 'ignore') return;
+      if (code === 'sudo-required' || code === 'ignore') {
+        return;
+      }
 
       // If user must login via SSO, redirect to org login page
       if (code === 'sso-required') {
@@ -131,6 +139,11 @@ const App = createReactClass({
       Cookies.set('session_expired', 1);
       window.location.reload();
     });
+
+    const user = ConfigStore.get('user');
+    if (user) {
+      HookStore.get('analytics:init-user').map(cb => cb(user));
+    }
   },
 
   componentDidMount() {
@@ -146,19 +159,21 @@ const App = createReactClass({
   },
 
   updateTracing() {
-    tracing.startTransaction();
-
     const route = getRouteStringFromRoutes(this.props.routes);
-    if (route) {
-      tracing.setRoute(route);
-    }
+    Tracing.startTrace(getCurrentHub(), route);
   },
 
   onConfigStoreChange(config) {
     const newState = {};
-    if (config.needsUpgrade !== undefined) newState.needsUpgrade = config.needsUpgrade;
-    if (config.user !== undefined) newState.user = config.user;
-    if (Object.keys(newState).length > 0) this.setState(newState);
+    if (config.needsUpgrade !== undefined) {
+      newState.needsUpgrade = config.needsUpgrade;
+    }
+    if (config.user !== undefined) {
+      newState.user = config.user;
+    }
+    if (Object.keys(newState).length > 0) {
+      this.setState(newState);
+    }
   },
 
   @keydown('meta+shift+p', 'meta+k')
@@ -180,8 +195,12 @@ const App = createReactClass({
   },
 
   handleGlobalModalClose() {
-    if (!this.mainContainerRef) return;
-    if (typeof this.mainContainerRef.focus !== 'function') return;
+    if (!this.mainContainerRef) {
+      return;
+    }
+    if (typeof this.mainContainerRef.focus !== 'function') {
+      return;
+    }
 
     // Focus the main container to get hotkeys to keep working after modal closes
     this.mainContainerRef.focus();
@@ -227,4 +246,12 @@ const App = createReactClass({
   },
 });
 
-export default App;
+export default withApi(App);
+
+injectGlobal`
+body {
+  .sentry-error-embed-wrapper {
+    z-index: ${theme.zIndex.sentryErrorEmbed};
+  }
+}
+`;

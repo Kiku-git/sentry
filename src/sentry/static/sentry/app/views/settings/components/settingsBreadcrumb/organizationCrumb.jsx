@@ -7,7 +7,7 @@ import BreadcrumbDropdown from 'app/views/settings/components/settingsBreadcrumb
 import IdBadge from 'app/components/idBadge';
 import MenuItem from 'app/views/settings/components/settingsBreadcrumb/menuItem';
 import SentryTypes from 'app/sentryTypes';
-import TextLink from 'app/components/textLink';
+import TextLink from 'app/components/links/textLink';
 import recreateRoute from 'app/utils/recreateRoute';
 import withLatestContext from 'app/utils/withLatestContext';
 
@@ -22,7 +22,9 @@ class OrganizationCrumb extends React.Component {
   render() {
     const {organizations, organization, params, routes, route, ...props} = this.props;
 
-    if (!organization) return null;
+    if (!organization) {
+      return null;
+    }
 
     const hasMenu = organizations.length > 1;
 

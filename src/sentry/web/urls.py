@@ -48,8 +48,8 @@ from sentry.web.frontend.restore_organization import RestoreOrganizationView
 from sentry.web.frontend.team_avatar import TeamAvatarPhotoView
 from sentry.web.frontend.account_identity import AccountIdentityAssociateView
 from sentry.web.frontend.sudo import SudoView
-from sentry.web.frontend.unsubscribe_issue_notifications import \
-    UnsubscribeIssueNotificationsView
+from sentry.web.frontend.unsubscribe_issue_notifications import UnsubscribeIssueNotificationsView
+from sentry.web.frontend.unsubscribe_incident_notifications import UnsubscribeIncidentNotificationsView
 from sentry.web.frontend.user_avatar import UserAvatarPhotoView
 from sentry.web.frontend.setup_wizard import SetupWizardView
 from sentry.web.frontend.vsts_extension_configuration import \
@@ -107,6 +107,11 @@ urlpatterns += patterns(
         r'^api/(?P<project_id>[\w_-]+)/minidump/?$',
         api.MinidumpView.as_view(),
         name='sentry-api-minidump'
+    ),
+    url(
+        r'^api/(?P<project_id>[\w_-]+)/events/(?P<event_id>[\w-]+)/attachments/$',
+        api.EventAttachmentStoreView.as_view(),
+        name='sentry-api-event-attachment'
     ),
     url(
         r'^api/(?P<project_id>[\w_-]+)/unreal/(?P<sentry_key>\w+)/$',
@@ -290,6 +295,11 @@ urlpatterns += patterns(
         UnsubscribeIssueNotificationsView.as_view(),
         name='sentry-account-email-unsubscribe-issue'
     ),
+    url(
+        r'^account/notifications/unsubscribe/incident/(?P<incident_id>\d+)/$',
+        UnsubscribeIncidentNotificationsView.as_view(),
+        name='sentry-account-email-unsubscribe-incident'
+    ),
     url(r'^account/remove/$',
         RedirectView.as_view(pattern_name="sentry-remove-account", permanent=False),
         ),
@@ -420,10 +430,16 @@ urlpatterns += patterns(
         name='sentry-organization-issue-detail'
     ),
     url(
-        r'^organizations/(?P<organization_slug>[\w_-]+)/issues/(?P<group_id>\d+)/events/(?P<event_id_or_latest>(\d+|latest))/$',
+        r'^organizations/(?P<organization_slug>[\w_-]+)/issues/(?P<group_id>\d+)/events/(?P<event_id_or_latest>[\w-]+)/$',
         react_page_view,
         name='sentry-organization-event-detail'
     ),
+    url(
+        r'^organizations/(?P<organization_slug>[\w_-]+)/issues/(?P<group_id>\d+)/events/(?P<event_id_or_latest>[\w-]+)/json/$',
+        GroupEventJsonView.as_view(),
+        name='sentry-group-event-json'
+    ),
+
     url(
         r'^organizations/(?P<organization_slug>[\w_-]+)/projects/(?P<project_slug>[\w_-]+)/events/(?P<client_event_id>[\w_-]+)/$',
         ProjectEventRedirect.as_view(),
@@ -584,7 +600,7 @@ urlpatterns += patterns(
         name='sentry-group'
     ),
     url(
-        r'^(?P<organization_slug>[\w_-]+)/(?P<project_slug>[\w_-]+)/issues/(?P<group_id>\d+)/events/(?P<event_id>\d+)/$',
+        r'^(?P<organization_slug>[\w_-]+)/(?P<project_slug>[\w_-]+)/issues/(?P<group_id>\d+)/events/(?P<event_id>[\w-]+)/$',
         react_page_view,
         name='sentry-group-event'
     ),
@@ -594,9 +610,9 @@ urlpatterns += patterns(
         name='sentry-stream'
     ),
     url(
-        r'^(?P<organization_slug>[\w_-]+)/(?P<project_slug>[\w_-]+)/(?:group|issues)/(?P<group_id>\d+)/events/(?P<event_id_or_latest>(\d+|latest))/json/$',
-        GroupEventJsonView.as_view(),
-        name='sentry-group-event-json'
+        r'^organizations/(?P<organization_slug>[\w_-]+)/incidents/(?P<incident_id>\d+)/$',
+        react_page_view,
+        name='sentry-incident',
     ),
     url(
         r'^(?P<organization_slug>[\w_-]+)/(?P<project_slug>[\w_-]+)/issues/(?P<group_id>\d+)/tags/(?P<key>[^\/]+)/export/$',

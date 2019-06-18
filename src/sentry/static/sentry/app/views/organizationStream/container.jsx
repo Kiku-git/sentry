@@ -1,9 +1,7 @@
-import {withRouter} from 'react-router';
 import React from 'react';
 import DocumentTitle from 'react-document-title';
 
 import {PageContent} from 'app/styles/organization';
-import Feature from 'app/components/acl/feature';
 import GlobalSelectionHeader from 'app/components/organizations/globalSelectionHeader';
 import NoProjectMessage from 'app/components/noProjectMessage';
 import SentryTypes from 'app/sentryTypes';
@@ -23,16 +21,16 @@ class OrganizationStreamContainer extends React.Component {
 
     return (
       <DocumentTitle title={this.getTitle()}>
-        <Feature features={['sentry10']} renderDisabled>
+        <React.Fragment>
           <GlobalSelectionHeader organization={organization} />
 
           <PageContent>
             <NoProjectMessage organization={organization}>{children}</NoProjectMessage>
           </PageContent>
-        </Feature>
+        </React.Fragment>
       </DocumentTitle>
     );
   }
 }
-export default withRouter(withOrganization(OrganizationStreamContainer));
+export default withOrganization(OrganizationStreamContainer);
 export {OrganizationStreamContainer};

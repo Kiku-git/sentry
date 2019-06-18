@@ -1,12 +1,65 @@
 from __future__ import absolute_import
 
+import logging
+
 __all__ = ('Sdk', )
 
 from distutils.version import LooseVersion
 from django.conf import settings
 
-from sentry.interfaces.base import Interface, InterfaceValidationError, prune_empty_keys
-from sentry.utils.safe import trim
+from sentry.interfaces.base import Interface, prune_empty_keys
+from sentry.net.http import Session
+from sentry.cache import default_cache
+
+
+logger = logging.getLogger(__name__)
+
+
+SDK_INDEX_CACHE_KEY = u'sentry:sdk-versions'
+
+
+def get_sdk_index():
+    value = default_cache.get(SDK_INDEX_CACHE_KEY)
+    if value is not None:
+        return value
+
+    base_url = settings.SENTRY_RELEASE_REGISTRY_BASEURL
+    if not base_url:
+        return {}
+
+    url = '%s/sdks' % (base_url,)
+
+    try:
+        with Session() as session:
+            response = session.get(url, timeout=1)
+            response.raise_for_status()
+            json = response.json()
+    except Exception:
+        logger.exception("Failed to fetch version index from release registry")
+        json = {}
+
+    default_cache.set(SDK_INDEX_CACHE_KEY, json, 3600)
+    return json
+
+
+def get_sdk_versions():
+    try:
+        rv = dict(settings.SDK_VERSIONS)
+        rv.update((key, info['version']) for (key, info) in get_sdk_index().items())
+        return rv
+    except Exception:
+        logger.exception("sentry-release-registry.sdk-versions")
+        return {}
+
+
+def get_sdk_urls():
+    try:
+        rv = dict(settings.SDK_URLS)
+        rv.update((key, info['main_docs_url']) for (key, info) in get_sdk_index().items())
+        return rv
+    except Exception:
+        logger.exception("sentry-release-registry.sdk-urls")
+        return {}
 
 
 def get_with_prefix(d, k, default=None, delimiter=":"):
@@ -51,25 +104,15 @@ class Sdk(Interface):
 
     @classmethod
     def to_python(cls, data):
-        name = data.get('name')
-        version = data.get('version')
+        for key in (
+            'name',
+            'version',
+            'integrations',
+            'packages',
+        ):
+            data.setdefault(key, None)
 
-        integrations = data.get('integrations')
-        if integrations and not isinstance(integrations, list):
-            raise InterfaceValidationError("'integrations' must be a list")
-
-        packages = data.get('packages')
-        if packages and not isinstance(packages, list):
-            raise InterfaceValidationError("'packages' must be a list")
-
-        kwargs = {
-            'name': trim(name, 128),
-            'version': trim(version, 128),
-            'integrations': integrations,
-            'packages': packages,
-        }
-
-        return cls(**kwargs)
+        return cls(**data)
 
     def to_json(self):
         return prune_empty_keys({
@@ -79,8 +122,8 @@ class Sdk(Interface):
             'packages': self.packages or None
         })
 
-    def get_api_context(self, is_public=False):
-        newest_version = get_with_prefix(settings.SDK_VERSIONS, self.name)
+    def get_api_context(self, is_public=False, platform=None):
+        newest_version = get_with_prefix(get_sdk_versions(), self.name)
         newest_name = get_with_prefix(settings.DEPRECATED_SDKS, self.name, self.name)
 
         if newest_version is not None:
@@ -102,11 +145,11 @@ class Sdk(Interface):
                 # when this is correct we can make it available
                 # 'version': newest_version,
                 'isNewer': is_newer,
-                'url': get_with_prefix(settings.SDK_URLS, newest_name),
+                'url': get_with_prefix(get_sdk_urls(), newest_name),
             },
         }
 
-    def get_api_meta(self, meta, is_public=False):
+    def get_api_meta(self, meta, is_public=False, platform=None):
         return {
             '': meta.get(''),
             'name': meta.get('name'),

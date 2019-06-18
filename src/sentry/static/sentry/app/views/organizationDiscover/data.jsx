@@ -36,6 +36,7 @@ export const HIDDEN_TAGS = ['sentry:user', 'sentry:release'];
 
 export const COLUMNS = [
   {name: 'id', type: TYPES.STRING},
+  {name: 'event.type', type: TYPES.STRING},
   {name: 'issue.id', type: TYPES.NUMBER},
   {name: 'project.id', type: TYPES.STRING},
   {name: 'project.name', type: TYPES.STRING},
@@ -78,7 +79,7 @@ export const COLUMNS = [
   {name: 'error.type', type: TYPES.STRING},
   {name: 'error.value', type: TYPES.STRING},
   {name: 'error.mechanism', type: TYPES.STRING},
-  {name: 'error.handled', type: TYPES.STRING},
+  {name: 'error.handled', type: TYPES.BOOLEAN},
   {name: 'stack.abs_path', type: TYPES.STRING},
   {name: 'stack.filename', type: TYPES.STRING},
   {name: 'stack.package', type: TYPES.STRING},

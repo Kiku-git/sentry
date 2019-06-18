@@ -14,7 +14,9 @@ exports[`SubscriptionBox renders resource checkbox 1`] = `
       className="css-8xqq56-SubscriptionGridItemWrapper e139qogw2"
     >
       <Tooltip
+        containerDisplayMode="inline-block"
         disabled={true}
+        position="top"
         title="Must have at least 'Read' permissions enabled for issue"
       >
         <SubscriptionGridItem

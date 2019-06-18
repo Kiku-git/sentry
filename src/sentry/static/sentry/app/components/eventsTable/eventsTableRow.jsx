@@ -8,10 +8,10 @@ import DateTime from 'app/components/dateTime';
 import DeviceName from 'app/components/deviceName';
 import FileSize from 'app/components/fileSize';
 import withOrganization from 'app/utils/withOrganization';
+import AttachmentUrl from 'app/utils/attachmentUrl';
 
 class EventsTableRow extends React.Component {
   static propTypes = {
-    organization: SentryTypes.Organization.isRequired,
     hasUser: PropTypes.bool,
     orgId: PropTypes.string.isRequired,
     groupId: PropTypes.string.isRequired,
@@ -25,8 +25,9 @@ class EventsTableRow extends React.Component {
     // all events will have this and most of this logic could go
     switch (event.type) {
       case 'error':
-        if (event.metadata.type && event.metadata.value)
+        if (event.metadata.type && event.metadata.value) {
           return `${event.metadata.type}: ${event.metadata.value}`;
+        }
         return event.metadata.type || event.metadata.value || event.metadata.title;
       case 'csp':
         return event.metadata.message;
@@ -38,40 +39,36 @@ class EventsTableRow extends React.Component {
   };
 
   renderCrashFileLink() {
-    const {orgId, event, projectId} = this.props;
+    const {event, projectId} = this.props;
     if (!event.crashFile) {
       return null;
     }
-    const url = `/api/0/projects/${orgId}/${projectId}/events/${event.id}/attachments/${event
-      .crashFile.id}/?download=1`;
+
     const crashFileType =
       event.crashFile.type === 'event.minidump' ? 'Minidump' : 'Crash file';
+
     return (
-      <small>
-        {crashFileType}: <a href={url}>{event.crashFile.name}</a> (<FileSize bytes={event.crashFile.size} />)
-      </small>
+      <AttachmentUrl projectId={projectId} event={event} attachment={event.crashFile}>
+        {downloadUrl =>
+          downloadUrl && (
+            <small>
+              {crashFileType}: <a href={downloadUrl}>{event.crashFile.name}</a> (
+              <FileSize bytes={event.crashFile.size} />)
+            </small>
+          )
+        }
+      </AttachmentUrl>
     );
   }
 
   render() {
-    const {
-      organization,
-      className,
-      event,
-      orgId,
-      projectId,
-      groupId,
-      tagList,
-      hasUser,
-    } = this.props;
+    const {className, event, orgId, groupId, tagList, hasUser} = this.props;
     const tagMap = {};
     event.tags.forEach(tag => {
       tagMap[tag.key] = tag.value;
     });
 
-    const basePath = new Set(organization.features).has('sentry10')
-      ? `/organizations/${orgId}/issues/`
-      : `/${orgId}/${projectId}/issues/`;
+    const basePath = `/organizations/${orgId}/issues/`;
 
     return (
       <tr key={event.id} className={className}>

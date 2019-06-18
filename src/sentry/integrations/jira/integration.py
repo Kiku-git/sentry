@@ -252,7 +252,7 @@ class JiraIntegration(IntegrationInstallation, IssueSyncMixin):
         return '%s/browse/%s' % (self.model.metadata['base_url'], key)
 
     def get_persisted_default_config_fields(self):
-        return ['project', 'issuetype', 'priority']
+        return ['project', 'issuetype', 'priority', 'labels']
 
     def get_group_description(self, group, event, **kwargs):
         output = [
@@ -310,8 +310,26 @@ class JiraIntegration(IntegrationInstallation, IssueSyncMixin):
         except ApiError as e:
             self.raise_error(e)
 
-    def make_choices(self, x):
-        return [(y['id'], y['name'] if 'name' in y else y['value']) for y in x] if x else []
+    def make_choices(self, values):
+        if not values:
+            return []
+        results = []
+        for item in values:
+            key = item.get('id', None)
+            if 'name' in item:
+                value = item['name']
+            elif 'value' in item:
+                # Value based options prefer the value on submit.
+                key = item['value']
+                value = item['value']
+            elif 'label' in item:
+                # Label based options prefer the value on submit.
+                key = item['label']
+                value = item['label']
+            else:
+                continue
+            results.append((key, value))
+        return results
 
     def error_message_from_json(self, data):
         message = ''
@@ -375,6 +393,14 @@ class JiraIntegration(IntegrationInstallation, IssueSyncMixin):
                     'default': ''
                 }
             )
+        elif schema['type'] == 'option' and len(field_meta.get('allowedValues', [])):
+            fieldtype = 'select'
+            fkwargs.update(
+                {
+                    'choices': self.make_choices(field_meta.get('allowedValues')),
+                    'default': ''
+                }
+            )
 
         # break this out, since multiple field types could additionally
         # be configured to use a custom property instead of a default.
@@ -407,17 +433,27 @@ class JiraIntegration(IntegrationInstallation, IssueSyncMixin):
         # all project metadata is expensive and wasteful. In the first run experience,
         # the user won't have a 'last used' project id so we need to iterate available
         # projects until we find one that we can get metadata for.
+        attempts = 0
         if len(jira_projects):
-            attempts = 0
             for fallback in jira_projects:
                 attempts += 1
                 meta = self.fetch_issue_create_meta(client, fallback['id'])
                 if meta:
-                    logging.info('jira.issue-create-meta.attempts', extra={
+                    logger.info('jira.get-issue-create-meta.attempts', extra={
                         'organization_id': self.organization_id,
                         'attempts': attempts,
                     })
                     return meta
+
+        jira_project_ids = 'no projects'
+        if len(jira_projects):
+            jira_project_ids = ','.join([project['key'] for project in jira_projects])
+
+        logger.info('jira.get-issue-create-meta.no-metadata', extra={
+            'organization_id': self.organization_id,
+            'attempts': attempts,
+            'jira_projects': jira_project_ids,
+        })
         raise IntegrationError(
             'Could not get issue create metadata for any Jira projects. '
             'Ensure that your project permissions are correct.'
@@ -427,16 +463,21 @@ class JiraIntegration(IntegrationInstallation, IssueSyncMixin):
         try:
             meta = client.get_create_meta_for_project(project_id)
         except ApiUnauthorized:
+            logger.info('jira.fetch-issue-create-meta.unauthorized', extra={
+                'organization_id': self.organization_id,
+                'jira_project': project_id,
+            })
             raise IntegrationError(
                 'Jira returned: Unauthorized. '
                 'Please check your configuration settings.'
             )
         except ApiError as exc:
             logger.info(
-                'jira.error-fetching-issue-config',
+                'jira.fetch-issue-create-meta.error',
                 extra={
                     'integration_id': self.model.id,
                     'organization_id': self.organization_id,
+                    'jira_project': project_id,
                     'error': exc.message,
                 }
             )
@@ -530,6 +571,8 @@ class JiraIntegration(IntegrationInstallation, IssueSyncMixin):
                 field['default'] = defaults.get('priority', '')
             elif field['name'] == 'fixVersions':
                 field['choices'] = self.make_choices(client.get_versions(meta['key']))
+            elif field['name'] == 'labels':
+                field['default'] = defaults.get('labels', '')
 
         return fields
 
@@ -550,6 +593,7 @@ class JiraIntegration(IntegrationInstallation, IssueSyncMixin):
             raise IntegrationError('Could not fetch issue create configuration from Jira.')
 
         issue_type_meta = self.get_issue_type_meta(data['issuetype'], meta)
+        user_id_field = client.user_id_field()
 
         fs = issue_type_meta['fields']
         for field in fs.keys():
@@ -579,14 +623,18 @@ class JiraIntegration(IntegrationInstallation, IssueSyncMixin):
                         cleaned_data[field] = v
                         continue
                     if schema['type'] == 'user' or schema.get('items') == 'user':
-                        v = {'name': v}
+                        v = {user_id_field: v}
                     elif schema.get('custom') == JIRA_CUSTOM_FIELD_TYPES.get('multiuserpicker'):
                         # custom multi-picker
-                        v = [{'name': v}]
-                    elif schema['type'] == 'array' and schema.get('items') != 'string':
-                        v = [{'id': vx} for vx in v]
+                        v = [{user_id_field: v}]
+                    elif schema['type'] == 'array' and schema.get('items') == 'option':
+                        v = [{'value': vx} for vx in v]
                     elif schema['type'] == 'array' and schema.get('items') == 'string':
                         v = [v]
+                    elif schema['type'] == 'array' and schema.get('items') != 'string':
+                        v = [{'id': vx} for vx in v]
+                    elif schema['type'] == 'option':
+                        v = {'value': v}
                     elif schema.get('custom') == JIRA_CUSTOM_FIELD_TYPES.get('textarea'):
                         v = v
                     elif (schema['type'] == 'number' or
@@ -664,7 +712,8 @@ class JiraIntegration(IntegrationInstallation, IssueSyncMixin):
                 return
 
         try:
-            client.assign_issue(external_issue.key, jira_user and jira_user['name'])
+            id_field = client.user_id_field()
+            client.assign_issue(external_issue.key, jira_user and jira_user.get(id_field))
         except (ApiUnauthorized, ApiError):
             # TODO(jess): do we want to email people about these types of failures?
             logger.info(
@@ -762,7 +811,7 @@ class JiraIntegrationProvider(IntegrationProvider):
         return []
 
     def build_integration(self, state):
-        # Most information is not availabe during integration install time,
+        # Most information is not available during integration installation,
         # since the integration won't have been fully configired on JIRA's side
         # yet, we can't make API calls for more details like the server name or
         # Icon.

@@ -1,12 +1,14 @@
 from __future__ import absolute_import
 
 from django.http import Http404
+from functools import wraps
 
 from sentry.utils.sdk import configure_scope
 from sentry.api.authentication import ClientIdSecretAuthentication
 from sentry.api.base import Endpoint
 from sentry.api.permissions import SentryPermission
 from sentry.auth.superuser import is_active_superuser
+from sentry.middleware.stats import add_request_metric_tags
 from sentry.models import SentryApp, SentryAppInstallation, Organization
 
 
@@ -31,6 +33,14 @@ def ensure_scoped_permission(request, allowed_scopes):
         return True
 
     return any(request.access.has_scope(s) for s in set(allowed_scopes))
+
+
+def add_integration_platform_metric_tag(func):
+    @wraps(func)
+    def wrapped(self, *args, **kwargs):
+        add_request_metric_tags(self.request, integration_platform=True)
+        return func(self, *args, **kwargs)
+    return wrapped
 
 
 class SentryAppsPermission(SentryPermission):
@@ -58,7 +68,13 @@ class SentryAppsPermission(SentryPermission):
         )
 
 
-class SentryAppsBaseEndpoint(Endpoint):
+class IntegrationPlatformEndpoint(Endpoint):
+    def dispatch(self, request, *args, **kwargs):
+        add_request_metric_tags(request, integration_platform=True)
+        return super(IntegrationPlatformEndpoint, self).dispatch(request, *args, **kwargs)
+
+
+class SentryAppsBaseEndpoint(IntegrationPlatformEndpoint):
     permission_classes = (SentryAppsPermission, )
 
     def convert_args(self, request, *args, **kwargs):
@@ -131,7 +147,7 @@ class SentryAppPermission(SentryPermission):
             return self.unpublished_scope_map
 
 
-class SentryAppBaseEndpoint(Endpoint):
+class SentryAppBaseEndpoint(IntegrationPlatformEndpoint):
     permission_classes = (SentryAppPermission, )
 
     def convert_args(self, request, sentry_app_slug, *args, **kwargs):
@@ -175,7 +191,7 @@ class SentryAppInstallationsPermission(SentryPermission):
         )
 
 
-class SentryAppInstallationsBaseEndpoint(Endpoint):
+class SentryAppInstallationsBaseEndpoint(IntegrationPlatformEndpoint):
     permission_classes = (SentryAppInstallationsPermission, )
 
     def convert_args(self, request, organization_slug, *args, **kwargs):
@@ -188,7 +204,6 @@ class SentryAppInstallationsBaseEndpoint(Endpoint):
             organization = organizations.get(slug=organization_slug)
         except Organization.DoesNotExist:
             raise Http404
-
         self.check_object_permissions(request, organization)
 
         kwargs['organization'] = organization
@@ -199,6 +214,14 @@ class SentryAppInstallationPermission(SentryPermission):
     scope_map = {
         'GET': ('org:read', 'org:integrations', 'org:write', 'org:admin'),
         'DELETE': ('org:integrations', 'org:write', 'org:admin'),
+        # NOTE(mn): The only POST endpoint right now is to create External
+        # Issues, which uses this baseclass since it's nested under an
+        # installation.
+        #
+        # The scopes below really only make sense for that endpoint. Any other
+        # nested endpoints will probably need different scopes - figure out how
+        # to deal with that when it happens.
+        'POST': ('org:integrations', 'event:write', 'event:admin'),
     }
 
     def has_object_permission(self, request, view, installation):
@@ -219,7 +242,7 @@ class SentryAppInstallationPermission(SentryPermission):
         )
 
 
-class SentryAppInstallationBaseEndpoint(Endpoint):
+class SentryAppInstallationBaseEndpoint(IntegrationPlatformEndpoint):
     permission_classes = (SentryAppInstallationPermission, )
 
     def convert_args(self, request, uuid, *args, **kwargs):

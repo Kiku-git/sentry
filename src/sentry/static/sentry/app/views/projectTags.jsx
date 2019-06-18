@@ -7,8 +7,8 @@ import Access from 'app/components/acl/access';
 import AsyncView from 'app/views/asyncView';
 import Button from 'app/components/button';
 import EmptyMessage from 'app/views/settings/components/emptyMessage';
-import ExternalLink from 'app/components/externalLink';
-import LinkWithConfirmation from 'app/components/linkWithConfirmation';
+import ExternalLink from 'app/components/links/externalLink';
+import LinkWithConfirmation from 'app/components/links/linkWithConfirmation';
 import PermissionAlert from 'app/views/settings/project/permissionAlert';
 import SettingsPageHeader from 'app/views/settings/components/settingsPageHeader';
 import TextBlock from 'app/views/settings/components/text/textBlock';
@@ -95,26 +95,25 @@ export default class ProjectTags extends AsyncView {
                               : t('You do not have permission to remove tags.')
                           }
                         >
-                          <span>
-                            <LinkWithConfirmation
-                              title={'Remove tag?'}
-                              message={'Are you sure you want to remove this tag?'}
-                              onConfirm={() => this.onDelete(key, idx)}
+                          <LinkWithConfirmation
+                            title="Remove tag?"
+                            message="Are you sure you want to remove this tag?"
+                            onConfirm={() => this.onDelete(key, idx)}
+                            disabled={!enabled}
+                          >
+                            <Button
+                              size="xsmall"
+                              icon="icon-trash"
+                              data-test-id="delete"
                               disabled={!enabled}
-                            >
-                              <Button
-                                size="xsmall"
-                                icon="icon-trash"
-                                data-test-id="delete"
-                                disabled={!enabled}
-                              />
-                            </LinkWithConfirmation>
-                          </span>
+                            />
+                          </LinkWithConfirmation>
                         </Tooltip>
                       </Flex>
                     </PanelItem>
                   );
-                })}
+                })
+              }
             </Access>
           </PanelBody>
         </Panel>

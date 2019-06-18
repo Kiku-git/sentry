@@ -8,8 +8,7 @@ const focusInput = el => el.find('input[name="query"]').simulate('focus');
 const selectFirstAutocompleteItem = el => {
   focusInput(el);
 
-  el
-    .find('.search-autocomplete-item')
+  el.find('SearchItem[data-test-id="search-autocomplete-item"]')
     .first()
     .simulate('click');
   const input = el.find('input');
@@ -19,8 +18,7 @@ const selectFirstAutocompleteItem = el => {
   return el;
 };
 const setQuery = (el, query) => {
-  el
-    .find('input')
+  el.find('input')
     .simulate('change', {target: {value: query}})
     .getDOMNode()
     .setSelectionRange(query.length, query.length);
@@ -82,11 +80,12 @@ describe('SearchBar', function() {
     wrapper.update();
 
     expect(wrapper.find('SearchDropdown').prop('searchSubstring')).toEqual('');
-    expect(wrapper.find('SearchDropdown').prop('items')).toEqual([
-      expect.objectContaining({
-        value: '"Nvidia 1080ti"',
-      }),
-    ]);
+    expect(
+      wrapper
+        .find('SearchDropdown Description')
+        .first()
+        .text()
+    ).toEqual('"Nvidia 1080ti"');
 
     selectFirstAutocompleteItem(wrapper);
     wrapper.update();
@@ -116,11 +115,11 @@ describe('SearchBar', function() {
     await tick();
     wrapper.update();
 
-    expect(wrapper.find('.search-description strong').text()).toBe('gpu');
+    expect(wrapper.find('Description strong').text()).toBe('gpu');
 
     // Should have nothing highlighted
     setQuery(wrapper, '');
-    expect(wrapper.find('.search-description strong')).toHaveLength(0);
+    expect(wrapper.find('Description strong')).toHaveLength(0);
   });
 
   it('ignores negation ("!") at the beginning of search term', async function() {
@@ -131,8 +130,12 @@ describe('SearchBar', function() {
     await tick();
     wrapper.update();
 
-    expect(wrapper.find('.search-autocomplete-item')).toHaveLength(1);
-    expect(wrapper.find('.search-autocomplete-item').text()).toBe('gpu:');
+    expect(
+      wrapper.find('SearchItem[data-test-id="search-autocomplete-item"]')
+    ).toHaveLength(1);
+    expect(
+      wrapper.find('SearchItem[data-test-id="search-autocomplete-item"]').text()
+    ).toBe('gpu:');
   });
 
   it('ignores wildcard ("*") at the beginning of tag value query', async function() {

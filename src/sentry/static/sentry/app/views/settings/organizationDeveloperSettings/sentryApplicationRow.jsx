@@ -1,33 +1,38 @@
 import React from 'react';
 import {Box, Flex} from 'grid-emotion';
 import {Link} from 'react-router';
+
+import Access from 'app/components/acl/access';
+import BetaTag from 'app/components/betaTag';
 import Button from 'app/components/button';
 import Confirm from 'app/components/confirm';
 import ConfirmDelete from 'app/components/confirmDelete';
-import SentryAppAvatar from 'app/components/avatar/sentryAppAvatar';
 import PropTypes from 'prop-types';
 import SentryTypes from 'app/sentryTypes';
-import Tooltip from 'app/components/tooltip';
 import {PanelItem} from 'app/components/panels';
 import {t} from 'app/locale';
 import styled from 'react-emotion';
 import space from 'app/styles/space';
 import {withTheme} from 'emotion-theming';
 import CircleIndicator from 'app/components/circleIndicator';
+import PluginIcon from 'app/plugins/components/pluginIcon';
+import {openSentryAppDetailsModal} from 'app/actionCreators/modal';
 
 export default class SentryApplicationRow extends React.PureComponent {
   static propTypes = {
     app: SentryTypes.SentryApplication,
-    orgId: PropTypes.string.isRequired,
+    organization: SentryTypes.Organization.isRequired,
     installs: PropTypes.array,
     onInstall: PropTypes.func,
     onUninstall: PropTypes.func,
     onRemoveApp: PropTypes.func,
     showPublishStatus: PropTypes.bool,
+    isInternal: PropTypes.bool,
   };
 
   static defaultProps = {
     showPublishStatus: false,
+    isInternal: false,
   };
 
   renderRemoveApp(app) {
@@ -58,41 +63,69 @@ export default class SentryApplicationRow extends React.PureComponent {
         onConfirm={() => this.props.onUninstall(install)}
       >
         <StyledButton borderless icon="icon-trash" data-test-id="sentry-app-uninstall">
-          {t('Remove')}
+          {t('Uninstall')}
         </StyledButton>
       </Confirm>
     );
   }
 
+  renderStatus() {
+    const {app, showPublishStatus, isInternal} = this.props;
+    const isInstalled = this.isInstalled;
+    if (isInternal) {
+      return <Status enabled isInternal />;
+    }
+    if (showPublishStatus) {
+      return <PublishStatus status={app.status} />;
+    }
+    return (
+      <React.Fragment>
+        <Status enabled={isInstalled} isInternal={false} />
+        <StyledLink onClick={this.openLearnMore}>{t('Learn More')}</StyledLink>
+      </React.Fragment>
+    );
+  }
+
+  get isInstalled() {
+    return this.props.installs && this.props.installs.length > 0;
+  }
+
+  openLearnMore = () => {
+    const {app, onInstall, organization} = this.props;
+    const isInstalled = !!this.isInstalled;
+
+    openSentryAppDetailsModal({
+      sentryApp: app,
+      isInstalled,
+      onInstall,
+      organization,
+    });
+  };
+
   render() {
-    const {app, orgId, installs, showPublishStatus} = this.props;
-    const isInstalled = installs && installs.length > 0;
+    const {app, organization, installs, showPublishStatus} = this.props;
+    const isInstalled = this.isInstalled;
 
     return (
       <SentryAppItem>
         <StyledFlex>
-          <SentryAppAvatar size={36} sentryApp={app} />
+          <PluginIcon size={36} pluginId={app.slug} />
           <SentryAppBox>
             <SentryAppName>
               {showPublishStatus ? (
-                <SentryAppLink to={`/settings/${orgId}/developer-settings/${app.slug}/`}>
+                <SentryAppLink
+                  to={`/settings/${organization.slug}/developer-settings/${app.slug}/`}
+                >
                   {app.name}
                 </SentryAppLink>
               ) : (
                 app.name
               )}
+              <BetaTag />
             </SentryAppName>
-            <SentryAppDetails>
-              {showPublishStatus ? (
-                <PublishStatus published={app.status === 'published'} />
-              ) : (
-                <React.Fragment>
-                  <Status enabled={isInstalled} />
-                  <StyledLink onClick={() => {}}>{t('Learn More')}</StyledLink>
-                </React.Fragment>
-              )}
-            </SentryAppDetails>
+            <SentryAppDetails>{this.renderStatus()}</SentryAppDetails>
           </SentryAppBox>
+
           {!showPublishStatus ? (
             <Box>
               {!isInstalled ? (
@@ -110,14 +143,32 @@ export default class SentryApplicationRow extends React.PureComponent {
             </Box>
           ) : (
             <Box>
-              {app.status === 'unpublished' ? (
-                this.renderRemoveApp(app)
+              {app.status !== 'published' ? (
+                <Access access={['org:admin']}>
+                  {({hasAccess}) => (
+                    <React.Fragment>
+                      {!hasAccess && (
+                        <Button
+                          disabled
+                          title={t(
+                            'Organization owner permissions are required for this action.'
+                          )}
+                          size="small"
+                          icon="icon-trash"
+                        />
+                      )}
+
+                      {hasAccess && this.renderRemoveApp(app)}
+                    </React.Fragment>
+                  )}
+                </Access>
               ) : (
-                <Tooltip title={t('Published apps cannot be removed.')}>
-                  <span>
-                    <Button disabled={true} size="small" icon="icon-trash" />
-                  </span>
-                </Tooltip>
+                <Button
+                  disabled
+                  title={t('Published apps cannot be removed.')}
+                  size="small"
+                  icon="icon-trash"
+                />
               )}
             </Box>
           )}
@@ -166,7 +217,7 @@ const StyledButton = styled(Button)`
 `;
 
 const Status = styled(
-  withTheme(({enabled, ...props}) => {
+  withTheme(({enabled, isInternal, ...props}) => {
     return (
       <Flex align="center">
         <CircleIndicator
@@ -182,7 +233,7 @@ const Status = styled(
   margin-left: ${space(0.5)};
   font-weight: light;
   &:after {
-    content: '|';
+    content: '${props => (props.isInternal ? '' : '|')}';
     color: ${p => p.theme.gray1};
     margin-left: ${space(0.75)};
     font-weight: normal;
@@ -190,14 +241,15 @@ const Status = styled(
   margin-right: ${space(0.75)};
 `;
 
-const PublishStatus = styled(({published, ...props}) => {
+const PublishStatus = styled(({status, ...props}) => {
   return (
     <Flex align="center">
-      <div {...props}>{published ? t('published') : t('unpublished')}</div>
+      <div {...props}>{t(`${status}`)}</div>
     </Flex>
   );
 })`
-  color: ${props => (props.published ? props.theme.success : props.theme.gray2)};
+  color: ${props =>
+    props.status === 'published' ? props.theme.success : props.theme.gray2};
   font-weight: light;
   margin-right: ${space(0.75)};
 `;

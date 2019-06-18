@@ -6,21 +6,22 @@ const validHookNames = new Set([
   // Additional routes
   'routes',
   'routes:admin',
+  'routes:onboarding',
   'routes:organization',
-  'routes:onboarding-survey',
   'routes:organization-root',
 
   // Analytics and tracking hooks
-  'amplitude:event',
+  'analytics:init-user',
+  'analytics:track-event',
+  'analytics:track-adhoc-event',
+
+  // TODO(epurkhser): This is deprecated and should be replaced
   'analytics:event',
-  'analytics:onboarding-survey-log',
 
   // Operational metrics
   'metrics:event',
 
   // Specific component customizations
-  'sidebar:onboarding-assets',
-  'utils:onboarding-survey-url',
   'component:org-auth-view',
   'component:org-members-view',
 
@@ -36,6 +37,13 @@ const validHookNames = new Set([
   'sidebar:bottom-items',
   'sidebar:item-label',
 
+  // Onboarding experience
+  // TODO(epurkhiser): These all should become less getsentry specific
+  'utils:onboarding-survey-url',
+  'sidebar:onboarding-assets',
+  'onboarding:invite-members',
+  'component:onboarding-new-project',
+
   // Used to provide a component for integration features.
   'integrations:feature-gates',
 
@@ -50,8 +58,12 @@ const validHookNames = new Set([
   'feature-disabled:sso-rippling',
   'feature-disabled:sso-saml2',
 
-  // TODO(epurkhiser): These are not used anymore and should be removed
-  'organization:sidebar',
+  // Explicit Feature hookNames
+  'feature-disabled:events-page',
+  'feature-disabled:events-sidebar-item',
+  'feature-disabled:discover-page',
+  'feature-disabled:discover-sidebar-item',
+  'feature-disabled:project-selector-checkbox',
 ]);
 
 /**

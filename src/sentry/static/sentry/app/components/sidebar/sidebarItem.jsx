@@ -4,10 +4,17 @@ import React from 'react';
 import styled, {css} from 'react-emotion';
 
 import HookOrDefault from 'app/components/hookOrDefault';
+import Tooltip from 'app/components/tooltip';
 
-import Link from '../link';
+import Link from '../links/link';
 import TextOverflow from '../textOverflow';
-import Tooltip from '../tooltip';
+
+const LabelHook = HookOrDefault({
+  hookName: 'sidebar:item-label',
+  defaultComponent: ({children}) => {
+    return <React.Fragment>{children}</React.Fragment>;
+  },
+});
 
 class SidebarItem extends React.Component {
   static propTypes = {
@@ -43,7 +50,9 @@ class SidebarItem extends React.Component {
   handleClick = e => {
     const {id, onClick} = this.props;
 
-    if (typeof onClick !== 'function') return;
+    if (typeof onClick !== 'function') {
+      return;
+    }
 
     onClick(id, e);
   };
@@ -71,19 +80,9 @@ class SidebarItem extends React.Component {
 
     const isTop = orientation === 'top';
     const placement = isTop ? 'bottom' : 'right';
-    const LabelHook = HookOrDefault({
-      hookName: 'sidebar:item-label',
-      defaultComponent: ({children}) => {
-        return <React.Fragment>{children}</React.Fragment>;
-      },
-    });
 
     return (
-      <Tooltip
-        disabled={!collapsed}
-        title={label}
-        tooltipOptions={{placement, html: true}}
-      >
+      <Tooltip disabled={!collapsed} title={label} placement={placement}>
         <StyledSidebarItem
           data-test-id={this.props['data-test-id']}
           active={active || isActiveRouter}
@@ -94,14 +93,13 @@ class SidebarItem extends React.Component {
         >
           <SidebarItemWrapper>
             <SidebarItemIcon>{icon}</SidebarItemIcon>
-            {!collapsed &&
-              !isTop && (
-                <SidebarItemLabel>
-                  <LabelHook id={this.props.id}>
-                    <TextOverflow>{label}</TextOverflow>
-                  </LabelHook>
-                </SidebarItemLabel>
-              )}
+            {!collapsed && !isTop && (
+              <SidebarItemLabel>
+                <LabelHook id={this.props.id}>
+                  <TextOverflow>{label}</TextOverflow>
+                </LabelHook>
+              </SidebarItemLabel>
+            )}
             {badge > 0 && (
               <SidebarItemBadge collapsed={collapsed}>{badge}</SidebarItemBadge>
             )}
@@ -115,7 +113,9 @@ class SidebarItem extends React.Component {
 export default withRouter(SidebarItem);
 
 const getActiveStyle = ({active, theme}) => {
-  if (!active) return '';
+  if (!active) {
+    return '';
+  }
   return css`
     color: ${theme.white};
 
@@ -208,7 +208,9 @@ const SidebarItemLabel = styled('span')`
 `;
 
 const getCollapsedBadgeStyle = ({collapsed, theme}) => {
-  if (!collapsed) return '';
+  if (!collapsed) {
+    return '';
+  }
 
   return css`
     text-indent: -99999em;

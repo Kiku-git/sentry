@@ -3,9 +3,10 @@ from __future__ import absolute_import
 import responses
 
 from django.db import connection
+from mock import patch
 
 from sentry.mediators.sentry_app_installations import Creator, Destroyer
-from sentry.models import ApiAuthorization, ApiGrant, SentryAppInstallation, ServiceHook
+from sentry.models import AuditLogEntry, AuditLogEntryEvent, ApiGrant, SentryAppInstallation, ServiceHook
 from sentry.testutils import TestCase
 
 
@@ -35,15 +36,6 @@ class TestDestroyer(TestCase):
             install=self.install,
             user=self.user,
         )
-
-    @responses.activate
-    def test_deletes_authorization(self):
-        auth = self.install.authorization
-
-        responses.add(responses.POST, 'https://example.com/webhook')
-        self.destroyer.call()
-
-        assert not ApiAuthorization.objects.filter(pk=auth.id).exists()
 
     @responses.activate
     def test_deletes_grant(self):
@@ -77,6 +69,44 @@ class TestDestroyer(TestCase):
         assert not ServiceHook.objects.filter(pk=hook.id).exists()
 
     @responses.activate
+    @patch('sentry.mediators.sentry_app_installations.InstallationNotifier.run')
+    def test_sends_notification(self, run):
+        with self.tasks():
+            responses.add(responses.POST, 'https://example.com/webhook')
+            request = self.make_request(user=self.user, method='GET')
+            Destroyer.run(
+                install=self.install,
+                user=self.user,
+                request=request,
+            )
+            run.assert_called_once_with(install=self.install, user=self.user, action='deleted')
+
+    @responses.activate
+    @patch('sentry.mediators.sentry_app_installations.InstallationNotifier.run')
+    def test_notify_false_does_not_send_notification(self, run):
+        with self.tasks():
+            responses.add(responses.POST, 'https://example.com/webhook')
+            request = self.make_request(user=self.user, method='GET')
+            Destroyer.run(
+                install=self.install,
+                user=self.user,
+                request=request,
+                notify=False,
+            )
+            assert not run.called
+
+    @responses.activate
+    def test_creates_audit_log_entry(self):
+        responses.add(responses.POST, 'https://example.com/webhook')
+        request = self.make_request(user=self.user, method='GET')
+        Destroyer.run(
+            install=self.install,
+            user=self.user,
+            request=request,
+        )
+        assert AuditLogEntry.objects.filter(event=AuditLogEntryEvent.SENTRY_APP_UNINSTALL).exists()
+
+    @responses.activate
     def test_soft_deletes_installation(self):
         responses.add(responses.POST, 'https://example.com/webhook')
         self.destroyer.call()
@@ -94,3 +124,21 @@ class TestDestroyer(TestCase):
             [self.install.id])
 
         assert c.fetchone()[0] == 1
+
+    @responses.activate
+    @patch('sentry.analytics.record')
+    def test_records_analytics(self, record):
+        responses.add(responses.POST, 'https://example.com/webhook')
+
+        Destroyer.run(
+            install=self.install,
+            user=self.user,
+            request=self.make_request(user=self.user, method='GET'),
+        )
+
+        record.assert_called_with(
+            'sentry_app.uninstalled',
+            user_id=self.user.id,
+            organization_id=self.org.id,
+            sentry_app=self.install.sentry_app.slug,
+        )

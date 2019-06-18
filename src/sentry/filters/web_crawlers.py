@@ -12,12 +12,12 @@ from sentry.utils.safe import get_path
 CRAWLERS = re.compile(
     r'|'.join(
         (
-            # various Google services
-            r'AdsBot',
-            # Google Adsense
-            r'Mediapartners',
-            # Google+ and Google web search
-            r'Google',
+            # Google spiders (Adsense and others)
+            # https://support.google.com/webmasters/answer/1061943?hl=en
+            r'Mediapartners\-Google',
+            r'AdsBot\-Google',
+            r'Googlebot',
+            r'FeedFetcher\-Google',
             # Bing search
             r'BingBot',
             r'BingPreview',
@@ -39,6 +39,10 @@ CRAWLERS = re.compile(
             r'Slack',
             # Google indexing bot
             r'Calypso AppCrawler',
+            # Pingdom
+            r'pingdom',
+            # Lytics
+            r'lyticsbot'
         )
     ),
     re.I
@@ -60,6 +64,8 @@ class WebCrawlersFilter(Filter):
             return ''
 
     def test(self, data):
+        """Return True if event with given user agent should be filtered out, False otherwise"""
+
         # TODO(dcramer): we could also look at UA parser and use the 'Spider'
         # device type
         user_agent = self.get_user_agent(data)

@@ -61,7 +61,20 @@ export default class InstallWizard extends AsyncView {
     const data = {};
     Object.keys(options).forEach(optionName => {
       const option = options[optionName];
-      if (!option.field.isSet) {
+      if (option.field.disabled) {
+        return;
+      }
+      // XXX(dcramer): we need the user to explicitly choose beacon.anonymous
+      // vs using an implied default so effectively this is binding
+      // all values to their server-defaults (as client-side defaults dont really work)
+      // TODO(dcramer): we need to rethink this logic as doing multiple "is this value actually set"
+      // is problematic
+      if (
+        option.value !== undefined &&
+        option.value !== '' &&
+        option.value !== null &&
+        (option.field.isSet || optionName != 'beacon.anonymous')
+      ) {
         data[optionName] = option.value;
       }
     });
@@ -86,8 +99,8 @@ export default class InstallWizard extends AsyncView {
             {this.state.loading
               ? this.renderLoading()
               : this.state.error
-                ? this.renderError(new Error('Unable to load all required endpoints'))
-                : this.renderBody()}
+              ? this.renderError(new Error('Unable to load all required endpoints'))
+              : this.renderBody()}
           </div>
         </div>
       </DocumentTitle>

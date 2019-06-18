@@ -1,4 +1,3 @@
-/*global global*/
 import React from 'react';
 
 import {mount} from 'enzyme';
@@ -12,7 +11,7 @@ describe('SubscriptionBox', () => {
     onChange = jest.fn();
     wrapper = mount(
       <SubscriptionBox
-        resource={'issue'}
+        resource="issue"
         checked={false}
         disabled={false}
         onChange={onChange}

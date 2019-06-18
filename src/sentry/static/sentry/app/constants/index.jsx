@@ -147,3 +147,11 @@ export const ALGOLIA_APP_ID = 'OOK48W9UCL';
 export const ALGOLIA_READ_ONLY = '2d64ec1106519cbc672d863b0d200782';
 export const ALGOLIA_DOCS_INDEX = 'sentry-docs';
 export const ALGOLIA_ZENDESK_INDEX = 'zendesk_sentry_articles';
+
+export const SEARCH_TYPES = {
+  ISSUE: 0,
+  EVENT: 1,
+};
+export const MAX_RECENT_SEARCHES = 3;
+
+export const DEFAULT_PER_PAGE = 50;

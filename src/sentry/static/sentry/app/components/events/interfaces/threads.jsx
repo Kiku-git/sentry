@@ -1,6 +1,6 @@
 import PropTypes from 'prop-types';
 import React from 'react';
-import GroupEventDataSection from 'app/components/events/eventDataSection';
+import EventDataSection from 'app/components/events/eventDataSection';
 import SentryTypes from 'app/sentryTypes';
 import {isStacktraceNewestFirst} from 'app/components/events/interfaces/stacktrace';
 import {defined} from 'app/utils';
@@ -83,8 +83,10 @@ function getThreadTitle(thread, event, simplified) {
           {frame.filename
             ? trimFilename(frame.filename)
             : frame.package
-              ? trimPackage(frame.package)
-              : frame.module ? frame.module : '<unknown>'}
+            ? trimPackage(frame.package)
+            : frame.module
+            ? frame.module
+            : '<unknown>'}
         </em>
       );
     }
@@ -124,8 +126,8 @@ function findBestThread(threads) {
 
 class Thread extends React.Component {
   static propTypes = {
-    group: SentryTypes.Group.isRequired,
     event: SentryTypes.Event.isRequired,
+    projectId: PropTypes.string.isRequired,
     data: PropTypes.object.isRequired,
     stackView: PropTypes.string,
     stackType: PropTypes.string,
@@ -158,8 +160,8 @@ class Thread extends React.Component {
   render() {
     const {
       data,
-      group,
       event,
+      projectId,
       stackView,
       stackType,
       newestFirst,
@@ -180,11 +182,11 @@ class Thread extends React.Component {
           this.renderMissingStacktrace()
         ) : (
           <CrashContent
-            group={group}
             event={event}
             stackType={stackType}
             stackView={stackView}
             newestFirst={newestFirst}
+            projectId={projectId}
             exception={exception}
             stacktrace={stacktrace}
           />
@@ -196,8 +198,8 @@ class Thread extends React.Component {
 
 class ThreadsInterface extends React.Component {
   static propTypes = {
-    group: SentryTypes.Group.isRequired,
     event: SentryTypes.Event.isRequired,
+    projectId: PropTypes.string.isRequired,
     type: PropTypes.string.isRequired,
     data: PropTypes.object.isRequired,
   };
@@ -245,8 +247,8 @@ class ThreadsInterface extends React.Component {
   };
 
   render() {
-    const group = this.props.group;
     const evt = this.props.event;
+    const {projectId} = this.props;
     const {stackView, stackType, newestFirst, activeThread} = this.state;
     const exception = this.getException();
     const stacktrace = this.getStacktrace();
@@ -276,7 +278,6 @@ class ThreadsInterface extends React.Component {
       <CrashHeader
         title={null}
         beforeTitle={threadSelector}
-        group={group}
         platform={evt.platform}
         thread={activeThread}
         stacktrace={stacktrace}
@@ -291,15 +292,13 @@ class ThreadsInterface extends React.Component {
     );
 
     return (
-      <GroupEventDataSection
-        group={group}
+      <EventDataSection
         event={evt}
         type={this.props.type}
         title={title}
         wrapTitle={false}
       >
         <Thread
-          group={group}
           data={activeThread}
           exception={exception}
           stackView={stackView}
@@ -307,8 +306,9 @@ class ThreadsInterface extends React.Component {
           stacktrace={stacktrace}
           event={evt}
           newestFirst={newestFirst}
+          projectId={projectId}
         />
-      </GroupEventDataSection>
+      </EventDataSection>
     );
   }
 }

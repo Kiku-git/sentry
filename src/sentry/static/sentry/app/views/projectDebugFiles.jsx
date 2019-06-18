@@ -1,13 +1,18 @@
 import {Box, Flex} from 'grid-emotion';
+import PropTypes from 'prop-types';
 import React from 'react';
 import styled from 'react-emotion';
 
 import {Panel, PanelBody, PanelHeader, PanelItem} from 'app/components/panels';
+import {fields} from 'app/data/forms/projectDebugFiles';
 import {t} from 'app/locale';
 import Access from 'app/components/acl/access';
 import AsyncComponent from 'app/components/asyncComponent';
 import Button from 'app/components/button';
 import Confirm from 'app/components/confirm';
+import Form from 'app/views/settings/components/forms/form';
+import JsonForm from 'app/views/settings/components/forms/jsonForm';
+import PermissionAlert from 'app/views/settings/project/permissionAlert';
 import EmptyStateWarning from 'app/components/emptyStateWarning';
 import FileSize from 'app/components/fileSize';
 import Pagination from 'app/components/pagination';
@@ -50,21 +55,34 @@ function getFeatureTooltip(feature) {
   }
 }
 
-const DebugSymbolDetails = styled.div`
+const DebugSymbolDetails = styled('div')`
   margin-top: 4px;
 `;
 
 class ProjectDebugSymbols extends AsyncComponent {
+  static contextTypes = {
+    organization: PropTypes.object.isRequired,
+  };
+
   getEndpoints() {
     const {orgId, projectId} = this.props.params;
+    const {organization} = this.context;
+    const features = new Set(organization.features);
 
-    return [
+    const endpoints = [
+      ['project', `/projects/${orgId}/${projectId}/`],
       [
         'debugFiles',
         `/projects/${orgId}/${projectId}/files/dsyms/`,
         {query: {query: this.props?.location?.query?.query}},
       ],
     ];
+
+    if (features.has('symbol-sources')) {
+      endpoints.push(['builtinSymbolSources', '/builtin-symbol-sources/']);
+    }
+
+    return endpoints;
   }
 
   onDelete(id) {
@@ -98,8 +116,9 @@ class ProjectDebugSymbols extends AsyncComponent {
     const {orgId, projectId} = this.props.params;
 
     const rows = this.state.debugFiles.map((dsym, key) => {
-      const url = `${this.api
-        .baseUrl}/projects/${orgId}/${projectId}/files/dsyms/?id=${dsym.id}`;
+      const url = `${this.api.baseUrl}/projects/${orgId}/${projectId}/files/dsyms/?id=${
+        dsym.id
+      }`;
       const fileType = getFileType(dsym);
       const symbolType = fileType ? `${dsym.symbolType} ${fileType}` : dsym.symbolType;
       const features = dsym.data && dsym.data.features;
@@ -134,9 +153,7 @@ class ProjectDebugSymbols extends AsyncComponent {
               {features &&
                 features.map(feature => (
                   <Tooltip key={feature} title={getFeatureTooltip(feature)}>
-                    <span>
-                      <Tag inline>{feature}</Tag>
-                    </span>
+                    <Tag inline>{feature}</Tag>
                   </Tooltip>
                 ))}
             </DebugSymbolDetails>
@@ -147,7 +164,7 @@ class ProjectDebugSymbols extends AsyncComponent {
                 <Button
                   size="xsmall"
                   icon="icon-download"
-                  onClick={() => (window.location = url)}
+                  href={url}
                   disabled={!hasAccess}
                   css={{
                     marginRight: space(0.5),
@@ -163,21 +180,19 @@ class ProjectDebugSymbols extends AsyncComponent {
                   disabled={hasAccess}
                   title={t('You do not have permission to delete debug files.')}
                 >
-                  <span>
-                    <Confirm
-                      title={t('Delete')}
-                      message={t('Are you sure you wish to delete this file?')}
-                      onConfirm={() => this.onDelete(dsym.id)}
+                  <Confirm
+                    title={t('Delete')}
+                    message={t('Are you sure you wish to delete this file?')}
+                    onConfirm={() => this.onDelete(dsym.id)}
+                    disabled={!hasAccess}
+                  >
+                    <Button
+                      priority="danger"
+                      icon="icon-trash"
+                      size="xsmall"
                       disabled={!hasAccess}
-                    >
-                      <Button
-                        priority="danger"
-                        icon="icon-trash"
-                        size="xsmall"
-                        disabled={!hasAccess}
-                      />
-                    </Confirm>
-                  </span>
+                    />
+                  </Confirm>
                 </Tooltip>
               )}
             </Access>
@@ -194,15 +209,55 @@ class ProjectDebugSymbols extends AsyncComponent {
   }
 
   renderBody() {
+    const {orgId, projectId} = this.props.params;
+    const {organization} = this.context;
+    const {project} = this.state;
+    const features = new Set(organization.features);
+    const access = new Set(organization.access);
+
+    const fieldProps = {
+      builtinSymbolSources: this.state.builtinSymbolSources,
+    };
+
     return (
       <React.Fragment>
         <SettingsPageHeader title={t('Debug Information Files')} />
+
         <TextBlock>
           {t(`
-          Here you can find all your uploaded debug information files (dSYMs, ProGuard, Breakpad ...).
-          This is used to convert addresses and minified function names from crash dumps
-          into function names and locations.`)}
+            Debug information files are used to convert addresses and minified
+            function names from native crash reports into function names and
+            locations.
+          `)}
         </TextBlock>
+
+        {features.has('symbol-sources') && (
+          <>
+            <PermissionAlert />
+
+            <Form
+              saveOnBlur
+              allowUndo
+              initialData={project}
+              apiMethod="PUT"
+              apiEndpoint={`/projects/${orgId}/${projectId}/`}
+            >
+              <JsonForm
+                access={access}
+                features={features}
+                title={t('External Sources')}
+                disabled={!access.has('project:write')}
+                fields={[fields.builtinSymbolSources, fields.symbolSources]}
+                additionalFieldProps={fieldProps}
+              />
+            </Form>
+          </>
+        )}
+
+        <TextBlock>
+          {t('This list contains all uploaded debug information files:')}
+        </TextBlock>
+
         <Panel>
           <PanelHeader hasButtons>
             <Box w={4.5 / 12}>{t('Debug ID')}</Box>

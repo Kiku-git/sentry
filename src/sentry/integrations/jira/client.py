@@ -67,6 +67,12 @@ class JiraCloud(object):
             params=params))
         return request_spec
 
+    def user_id_field(self):
+        """
+        Jira-Cloud requires GDPR compliant API usage so we have to use accountId
+        """
+        return 'accountId'
+
 
 class JiraApiClient(ApiClient):
     COMMENTS_URL = '/rest/api/2/issue/%s/comment'
@@ -84,6 +90,8 @@ class JiraApiClient(ApiClient):
     ASSIGN_URL = '/rest/api/2/issue/%s/assignee'
     TRANSITION_URL = '/rest/api/2/issue/%s/transitions'
 
+    integration_name = 'jira'
+
     def __init__(self, base_url, jira_style, verify_ssl):
         self.base_url = base_url
         # `jira_style` encapsulates differences between jira server & jira cloud.
@@ -98,7 +106,17 @@ class JiraApiClient(ApiClient):
         add authentication data and transform parameters.
         """
         request_spec = self.jira_style.request_hook(method, path, data, params, **kwargs)
+        if 'headers' not in request_spec:
+            request_spec['headers'] = {}
+
+        # Force adherence to the GDPR compliant API conventions.
+        # See
+        # https://developer.atlassian.com/cloud/jira/platform/deprecation-notice-user-privacy-api-migration-guide
+        request_spec['headers']['x-atlassian-force-account-id'] = 'true'
         return self._request(**request_spec)
+
+    def user_id_field(self):
+        return self.jira_style.user_id_field()
 
     def get_cached(self, url, params=None):
         """
@@ -189,18 +207,17 @@ class JiraApiClient(ApiClient):
 
     def search_users_for_project(self, project, username):
         # Jira Server wants a project key, while cloud is indifferent.
+        # Use the query parameter as our implemention follows jira's gdpr practices
         project_key = self.get_project_key_for_id(project)
         return self.get_cached(
             self.USERS_URL,
-            params={'project': project_key, 'username': username})
+            params={'project': project_key, 'query': username})
 
     def search_users_for_issue(self, issue_key, email):
-        # not actully in the official documentation, but apparently
-        # you can pass email as the username param see:
-        # https://community.atlassian.com/t5/Answers-Developer-Questions/JIRA-Rest-API-find-JIRA-user-based-on-user-s-email-address/qaq-p/532715
+        # Use the query parameter as our implemention follows jira's gdpr practices
         return self.get_cached(
             self.USERS_URL,
-            params={'issueKey': issue_key, 'username': email})
+            params={'issueKey': issue_key, 'query': email})
 
     def create_issue(self, raw_form_data):
         data = {'fields': raw_form_data}
@@ -220,5 +237,6 @@ class JiraApiClient(ApiClient):
             'transition': {'id': transition_id},
         })
 
-    def assign_issue(self, key, username):
-        return self.put(self.ASSIGN_URL % key, data={'name': username})
+    def assign_issue(self, key, name_or_account_id):
+        user_id_field = self.user_id_field()
+        return self.put(self.ASSIGN_URL % key, data={user_id_field: name_or_account_id})

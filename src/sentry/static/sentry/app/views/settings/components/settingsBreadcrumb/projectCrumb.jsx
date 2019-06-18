@@ -8,7 +8,7 @@ import IdBadge from 'app/components/idBadge';
 import LoadingIndicator from 'app/components/loadingIndicator';
 import MenuItem from 'app/views/settings/components/settingsBreadcrumb/menuItem';
 import SentryTypes from 'app/sentryTypes';
-import TextLink from 'app/components/textLink';
+import TextLink from 'app/components/links/textLink';
 import recreateRoute from 'app/utils/recreateRoute';
 import replaceRouterParams from 'app/utils/replaceRouterParams';
 import withLatestContext from 'app/utils/withLatestContext';
@@ -51,8 +51,12 @@ class ProjectCrumb extends React.Component {
       ...props
     } = this.props;
 
-    if (!latestOrganization) return null;
-    if (!projects) return null;
+    if (!latestOrganization) {
+      return null;
+    }
+    if (!projects) {
+      return null;
+    }
 
     const hasMenu = projects && projects.length > 1;
 
@@ -101,7 +105,7 @@ export default withProjects(withLatestContext(ProjectCrumb));
 // Set height of crumb because of spinner
 const SPINNER_SIZE = '24px';
 
-const ProjectName = styled.div`
+const ProjectName = styled('div')`
   display: flex;
 
   .loading {

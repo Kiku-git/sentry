@@ -1,27 +1,29 @@
+import {Flex} from 'grid-emotion';
 import {Link, browserHistory} from 'react-router';
 import LazyLoad from 'react-lazyload';
-import React from 'react';
 import PropTypes from 'prop-types';
+import React from 'react';
 import createReactClass from 'create-react-class';
-import {Flex} from 'grid-emotion';
 import styled from 'react-emotion';
 
-import SentryTypes from 'app/sentryTypes';
+import {sortProjects} from 'app/utils';
+import {t} from 'app/locale';
+import Button from 'app/components/button';
+import ConfigStore from 'app/stores/configStore';
 import IdBadge from 'app/components/idBadge';
 import NoProjectMessage from 'app/components/noProjectMessage';
-import OrganizationState from 'app/mixins/organizationState';
+import PageHeading from 'app/components/pageHeading';
 import ProjectsStatsStore from 'app/stores/projectsStatsStore';
-import ConfigStore from 'app/stores/configStore';
+import SentryTypes from 'app/sentryTypes';
 import getProjectsByTeams from 'app/utils/getProjectsByTeams';
-import {sortProjects} from 'app/utils';
 import getRouteStringFromRoutes from 'app/utils/getRouteStringFromRoutes';
-import withTeams from 'app/utils/withTeams';
+import space from 'app/styles/space';
+import withOrganization from 'app/utils/withOrganization';
 import withProjects from 'app/utils/withProjects';
-import {t} from 'app/locale';
+import withTeams from 'app/utils/withTeams';
 
-import ProjectNav from './projectNav';
-import TeamSection from './teamSection';
 import Resources from './resources';
+import TeamSection from './teamSection';
 
 class Dashboard extends React.Component {
   static propTypes = {
@@ -32,18 +34,14 @@ class Dashboard extends React.Component {
   };
 
   componentDidMount() {
-    document.body.classList.add('org-dashboard');
-
     const {organization, routes} = this.props;
-    const hasSentry10 = new Set(organization.features).has('sentry10');
     const isOldRoute = getRouteStringFromRoutes(routes) === '/:orgId/';
 
-    if (hasSentry10 && isOldRoute) {
+    if (isOldRoute) {
       browserHistory.replace(`/organizations/${organization.slug}/`);
     }
   }
   componentWillUnmount() {
-    document.body.classList.remove('org-dashboard');
     ProjectsStatsStore.reset();
   }
 
@@ -57,9 +55,8 @@ class Dashboard extends React.Component {
     const teamSlugs = Object.keys(projectsByTeam).sort();
     const favorites = projects.filter(project => project.isBookmarked);
     const access = new Set(organization.access);
+    const canCreateProjects = access.has('project:admin');
     const teamsMap = new Map(teams.map(teamObj => [teamObj.slug, teamObj]));
-
-    const hasSentry10 = new Set(organization.features).has('sentry10');
 
     const hasTeamAdminAccess = access.has('team:admin');
 
@@ -69,18 +66,24 @@ class Dashboard extends React.Component {
 
     return (
       <React.Fragment>
-        {!hasSentry10 &&
-          favorites.length > 0 && (
-            <TeamSection
-              data-test-id="favorites"
-              orgId={params.orgId}
-              showBorder
-              team={null}
-              title={t('Bookmarked projects')}
-              projects={favorites}
-              access={access}
-            />
-          )}
+        {projects.length > 0 && (
+          <ProjectsHeader>
+            <PageHeading>Projects</PageHeading>
+            <Button
+              size="small"
+              disabled={!canCreateProjects}
+              title={
+                !canCreateProjects
+                  ? t('You do not have permission to create projects')
+                  : undefined
+              }
+              to={`/organizations/${organization.slug}/projects/new/`}
+              icon="icon-circle-add"
+            >
+              {t('Create Project')}
+            </Button>
+          </ProjectsHeader>
+        )}
 
         {teamSlugs.map((slug, index) => {
           const showBorder = index !== teamSlugs.length - 1;
@@ -94,10 +97,10 @@ class Dashboard extends React.Component {
                 title={
                   hasTeamAdminAccess ? (
                     <TeamLink to={`/settings/${organization.slug}/teams/${team.slug}/`}>
-                      <IdBadge team={team} />
+                      <IdBadge team={team} avatarSize={22} />
                     </TeamLink>
                   ) : (
-                    <IdBadge team={team} />
+                    <IdBadge team={team} avatarSize={22} />
                   )
                 }
                 projects={projectsByTeam[slug]}
@@ -106,24 +109,19 @@ class Dashboard extends React.Component {
             </LazyLoad>
           );
         })}
-        {teamSlugs.length === 0 &&
-          favorites.length === 0 && (
-            <NoProjectMessage organization={organization}>{null}</NoProjectMessage>
-          )}
+        {teamSlugs.length === 0 && favorites.length === 0 && (
+          <NoProjectMessage organization={organization}>{null}</NoProjectMessage>
+        )}
       </React.Fragment>
     );
   }
 }
 
 const OrganizationDashboard = createReactClass({
-  displayName: 'OrganizationDashboard',
-  mixins: [OrganizationState],
-
   render() {
     return (
       <Flex flex="1" direction="column">
-        {!this.getFeatures().has('sentry10') && <ProjectNav />}
-        <Dashboard organization={this.context.organization} {...this.props} />
+        <Dashboard {...this.props} />
       </Flex>
     );
   },
@@ -134,5 +132,12 @@ const TeamLink = styled(Link)`
   align-items: center;
 `;
 
+const ProjectsHeader = styled('div')`
+  padding: ${space(3)} ${space(4)} 0 ${space(4)};
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+`;
+
 export {Dashboard};
-export default withTeams(withProjects(OrganizationDashboard));
+export default withTeams(withProjects(withOrganization(OrganizationDashboard)));

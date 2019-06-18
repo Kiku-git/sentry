@@ -34,17 +34,11 @@ describe('OrganizationMembers', function() {
       id: 'active',
     },
   });
-  let getStub;
 
-  beforeAll(function() {
-    getStub = sinon
-      .stub(ConfigStore, 'get')
-      .withArgs('user')
-      .returns(currentUser);
-  });
+  jest.spyOn(ConfigStore, 'get').mockImplementation(() => currentUser);
 
   afterAll(function() {
-    getStub.restore();
+    ConfigStore.get.mockRestore();
   });
 
   beforeEach(function() {
@@ -83,12 +77,17 @@ describe('OrganizationMembers', function() {
         require_link: true,
       },
     });
+    Client.addMockResponse({
+      url: '/organizations/org-id/teams/',
+      method: 'GET',
+      body: TestStubs.Team(),
+    });
     browserHistory.push.mockReset();
     OrganizationsStore.load([organization]);
   });
 
   it('can remove a member', async function() {
-    const deleteMock = Client.addMockResponse({
+    const deleteMock = MockApiClient.addMockResponse({
       url: `/organizations/org-id/members/${members[0].id}/`,
       method: 'DELETE',
     });
@@ -122,7 +121,7 @@ describe('OrganizationMembers', function() {
   });
 
   it('displays error message when failing to remove member', async function() {
-    const deleteMock = Client.addMockResponse({
+    const deleteMock = MockApiClient.addMockResponse({
       url: `/organizations/org-id/members/${members[0].id}/`,
       method: 'DELETE',
       statusCode: 500,

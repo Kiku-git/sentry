@@ -14,12 +14,14 @@ module.exports = {
     // https://babeljs.io/docs/en/plugins#plugin-ordering
     ['@babel/plugin-proposal-decorators', {legacy: true}],
     ['@babel/plugin-proposal-class-properties', {loose: true}],
-    ['babel-plugin-transform-builtin-extend', {globals: ['Array', 'Error']}],
   ],
   env: {
     production: {},
     development: {
-      plugins: [['emotion', {sourceMap: true, autoLabel: true}]],
+      plugins: [
+        ['emotion', {sourceMap: true, autoLabel: true}],
+        '@babel/plugin-transform-react-jsx-source',
+      ],
     },
     test: {
       plugins: [['emotion', {autoLabel: true}], 'dynamic-import-node'],

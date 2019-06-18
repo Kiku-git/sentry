@@ -30,6 +30,8 @@ export const doEventsRequest = (
     includePrevious,
     limit,
     query,
+    yAxis,
+    groupId,
   }
 ) => {
   const shouldDoublePeriod = canIncludePreviousPeriod(includePrevious, period);
@@ -38,6 +40,8 @@ export const doEventsRequest = (
     project,
     environment,
     query,
+    yAxis,
+    group: groupId,
   };
 
   // Doubling period for absolute dates is not accurate unless starting and

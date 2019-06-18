@@ -1,6 +1,7 @@
 import {browserHistory} from 'react-router';
-import {isEqual, omit, pickBy, uniq, sortBy} from 'lodash';
+import {isEqual, omit, pickBy, uniq} from 'lodash';
 import Cookies from 'js-cookie';
+import PropTypes from 'prop-types';
 import React from 'react';
 import Reflux from 'reflux';
 import classNames from 'classnames';
@@ -8,43 +9,47 @@ import createReactClass from 'create-react-class';
 import qs from 'query-string';
 
 import {Client} from 'app/api';
+import {Panel, PanelBody} from 'app/components/panels';
+import {analytics} from 'app/utils/analytics';
+import {defined} from 'app/utils';
+import {
+  deleteSavedSearch,
+  fetchSavedSearches,
+  resetSavedSearches,
+} from 'app/actionCreators/savedSearches';
+import {extractSelectionParameters} from 'app/components/organizations/globalSelectionHeader/utils';
+import {fetchOrgMembers, indexMembersByProject} from 'app/actionCreators/members';
+import {fetchOrganizationTags, fetchTagValues} from 'app/actionCreators/tags';
+import {getUtcDateString} from 'app/utils/dates';
 import {t} from 'app/locale';
-import ErrorRobot from 'app/components/errorRobot';
+import ConfigStore from 'app/stores/configStore';
+import CursorPoller from 'app/utils/cursorPoller';
 import EmptyStateWarning from 'app/components/emptyStateWarning';
+import ErrorRobot from 'app/components/errorRobot';
+import GroupStore from 'app/stores/groupStore';
 import LoadingError from 'app/components/loadingError';
 import LoadingIndicator from 'app/components/loadingIndicator';
-import {extractSelectionParameters} from 'app/components/organizations/globalSelectionHeader/utils';
 import Pagination from 'app/components/pagination';
-import {Panel, PanelBody} from 'app/components/panels';
-import StreamGroup from 'app/components/stream/group';
-import {fetchOrganizationTags, fetchTagValues} from 'app/actionCreators/tags';
-import {fetchOrgMembers, indexMembersByProject} from 'app/actionCreators/members';
-import {fetchSavedSearches} from 'app/actionCreators/savedSearches';
-import ConfigStore from 'app/stores/configStore';
-import GroupStore from 'app/stores/groupStore';
-import SelectedGroupStore from 'app/stores/selectedGroupStore';
-import TagStore from 'app/stores/tagStore';
-import SentryTypes from 'app/sentryTypes';
-import StreamActions from 'app/views/stream/actions';
-import StreamFilters from 'app/views/stream/filters';
-import StreamSidebar from 'app/views/stream/sidebar';
 import ProcessingIssueList from 'app/components/stream/processingIssueList';
-import {analytics} from 'app/utils/analytics';
-import {getUtcDateString} from 'app/utils/dates';
-import {logAjaxError} from 'app/utils/logging';
+import SelectedGroupStore from 'app/stores/selectedGroupStore';
+import SentryTypes from 'app/sentryTypes';
+import StreamGroup from 'app/components/stream/group';
+import StreamManager from 'app/utils/streamManager';
+import TagStore from 'app/stores/tagStore';
 import parseApiError from 'app/utils/parseApiError';
 import parseLinkHeader from 'app/utils/parseLinkHeader';
-import utils from 'app/utils';
-import withOrganization from 'app/utils/withOrganization';
 import withGlobalSelection from 'app/utils/withGlobalSelection';
+import withOrganization from 'app/utils/withOrganization';
+import withSavedSearches from 'app/utils/withSavedSearches';
+import StreamActions from './actions';
+import StreamFilters from './filters';
+import StreamSidebar from './sidebar';
 
 const MAX_ITEMS = 25;
 const DEFAULT_QUERY = 'is:unresolved';
 const DEFAULT_SORT = 'date';
 const DEFAULT_STATS_PERIOD = '24h';
 const STATS_PERIODS = new Set(['14d', '24h']);
-// TODO: Delete this after testing production counts cc/ @wedamija
-const NEW_FILTERS_TEST = 'use_new_filters';
 
 const OrganizationStream = createReactClass({
   displayName: 'OrganizationStream',
@@ -52,6 +57,9 @@ const OrganizationStream = createReactClass({
   propTypes: {
     organization: SentryTypes.Organization,
     selection: SentryTypes.GlobalSelection,
+    savedSearch: SentryTypes.SavedSearch,
+    savedSearches: PropTypes.arrayOf(SentryTypes.SavedSearch),
+    savedSearchLoading: PropTypes.bool.isRequired,
   },
 
   mixins: [
@@ -75,9 +83,6 @@ const OrganizationStream = createReactClass({
       queryCount: null,
       error: false,
       isSidebarVisible: false,
-      savedSearchLoading: true,
-      savedSearch: null,
-      savedSearchList: [],
       issuesLoading: true,
       tagsLoading: true,
       memberList: {},
@@ -91,8 +96,8 @@ const OrganizationStream = createReactClass({
 
   componentDidMount() {
     this.api = new Client();
-    this._streamManager = new utils.StreamManager(GroupStore);
-    this._poller = new utils.CursorPoller({
+    this._streamManager = new StreamManager(GroupStore);
+    this._poller = new CursorPoller({
       success: this.onRealtimePoll,
     });
 
@@ -100,14 +105,8 @@ const OrganizationStream = createReactClass({
     this.fetchMemberList();
 
     // Start by getting searches first so if the user is on a saved search
-    // we load the correct data the first time.
+    // or they have a pinned search we load the correct data the first time.
     this.fetchSavedSearches();
-
-    // If we don't have a searchId there won't be more chained requests
-    // so we should fetch groups
-    if (!this.props.params.searchId) {
-      this.fetchData();
-    }
   },
 
   componentDidUpdate(prevProps, prevState) {
@@ -130,6 +129,14 @@ const OrganizationStream = createReactClass({
     const prevQuery = prevProps.location.query;
     const newQuery = this.props.location.query;
 
+    // Wait for saved searches to load before we attempt to fetch stream data
+    if (this.props.savedSearchLoading) {
+      return;
+    } else if (prevProps.savedSearchLoading) {
+      this.fetchData();
+      return;
+    }
+
     // If any important url parameter changed or saved search changed
     // reload data.
     if (
@@ -139,7 +146,7 @@ const OrganizationStream = createReactClass({
       prevQuery.query !== newQuery.query ||
       prevQuery.statsPeriod !== newQuery.statsPeriod ||
       prevQuery.groupStatsPeriod !== newQuery.groupStatsPeriod ||
-      prevState.savedSearch !== this.state.savedSearch
+      prevProps.savedSearch !== this.props.savedSearch
     ) {
       this.fetchData();
     } else if (
@@ -158,6 +165,18 @@ const OrganizationStream = createReactClass({
     this.projectCache = {};
     GroupStore.reset();
     this.api.clear();
+
+    // Reset store when unmounting because we always fetch on mount
+    // This means if you navigate away from stream and then back to stream,
+    // this component will go from:
+    // "ready" ->
+    // "loading" (because fetching saved searches) ->
+    // "ready"
+    //
+    // We don't render anything until saved searches is ready, so this can
+    // cause weird side effects (e.g. ProcessingIssueList mounting and making
+    // a request, but immediately unmounting when fetching saved searches)
+    resetSavedSearches();
   },
 
   // Memoize projects fetched as selections are made
@@ -165,9 +184,10 @@ const OrganizationStream = createReactClass({
   projectCache: {},
 
   getQuery() {
-    if (this.state.savedSearch) {
-      return this.state.savedSearch.query;
+    if (this.props.savedSearch) {
+      return this.props.savedSearch.query;
     }
+
     const {query} = this.props.location.query;
     return typeof query === 'undefined' ? DEFAULT_QUERY : query;
   },
@@ -190,6 +210,7 @@ const OrganizationStream = createReactClass({
       query: this.getQuery(),
       ...selection.datetime,
     };
+
     if (selection.datetime.period) {
       delete params.period;
       params.statsPeriod = selection.datetime.period;
@@ -212,11 +233,11 @@ const OrganizationStream = createReactClass({
     }
 
     // only include defined values.
-    return pickBy(params, v => utils.defined(v));
+    return pickBy(params, v => defined(v));
   },
 
-  getAccess() {
-    return new Set(this.props.organization.access);
+  getFeatures() {
+    return new Set(this.props.organization.features);
   },
 
   /**
@@ -224,7 +245,9 @@ const OrganizationStream = createReactClass({
    */
   getGlobalSearchProjects() {
     let {projects} = this.props.selection;
-    projects = projects.map(p => p.toString());
+
+    // Not sure how this worked before for "omits null values" test
+    projects = (projects && projects.map(p => p.toString())) || [];
 
     return this.props.organization.projects.filter(p => projects.indexOf(p.id) > -1);
   },
@@ -261,12 +284,6 @@ const OrganizationStream = createReactClass({
     const currentQuery = this.props.location.query || {};
     if ('cursor' in currentQuery) {
       requestParams.cursor = currentQuery.cursor;
-    } else if (NEW_FILTERS_TEST in currentQuery) {
-      // TODO: Delete this after testing production counts cc/ @wedamija
-      requestParams[NEW_FILTERS_TEST] = currentQuery[NEW_FILTERS_TEST];
-    } else if (ConfigStore.get('user').isSuperuser) {
-      // TODO: Delete this after testing production counts cc/ @wedamija
-      requestParams[NEW_FILTERS_TEST] = 1;
     }
 
     if (this.lastRequest) {
@@ -302,6 +319,7 @@ const OrganizationStream = createReactClass({
 
         const queryCount = jqXHR.getResponseHeader('X-Hits');
         const queryMaxCount = jqXHR.getResponseHeader('X-Max-Hits');
+        const pageLinks = jqXHR.getResponseHeader('Link');
 
         this.setState({
           error: false,
@@ -310,7 +328,7 @@ const OrganizationStream = createReactClass({
             typeof queryCount !== 'undefined' ? parseInt(queryCount, 10) || 0 : 0,
           queryMaxCount:
             typeof queryMaxCount !== 'undefined' ? parseInt(queryMaxCount, 10) || 0 : 0,
-          pageLinks: jqXHR.getResponseHeader('Link'),
+          pageLinks,
         });
       },
       error: err => {
@@ -328,7 +346,9 @@ const OrganizationStream = createReactClass({
   },
 
   resumePolling() {
-    if (!this.state.pageLinks) return;
+    if (!this.state.pageLinks) {
+      return;
+    }
 
     // Only resume polling if we're on the first page of results
     const links = parseLinkHeader(this.state.pageLinks);
@@ -344,10 +364,6 @@ const OrganizationStream = createReactClass({
     return `/organizations/${params.orgId}/issues/`;
   },
 
-  onSavedSearchSelect(search) {
-    this.setState({savedSearch: search, issuesLoading: true}, this.transitionTo);
-  },
-
   onRealtimeChange(realtime) {
     Cookies.set('realtimeActive', realtime.toString());
     this.setState({
@@ -356,18 +372,15 @@ const OrganizationStream = createReactClass({
   },
 
   onSelectStatsPeriod(period) {
-    if (period != this.getGroupStatsPeriod()) {
+    if (period !== this.getGroupStatsPeriod()) {
       this.transitionTo({groupStatsPeriod: period});
     }
   },
 
   onRealtimePoll(data, links) {
+    // Note: We do not update state with cursors from polling,
+    // `CursorPoller` updates itself with new cursors
     this._streamManager.unshift(data);
-    if (!utils.valueIsEqual(this.state.pageLinks, links, true)) {
-      this.setState({
-        pageLinks: links,
-      });
-    }
   },
 
   onGroupChange() {
@@ -377,12 +390,24 @@ const OrganizationStream = createReactClass({
     }
   },
 
+  onStreamSidebarSearch(query) {
+    analytics('search.searched', {
+      org_id: this.props.organization.id,
+      query,
+      source: 'issues',
+      search_source: 'search_builder',
+    });
+
+    this.onSearch(query);
+  },
+
   onSearch(query) {
     if (query === this.state.query) {
       // if query is the same, just re-fetch data
       this.fetchData();
     } else {
-      this.transitionTo({query});
+      // Clear the saved search as the user wants something else.
+      this.transitionTo({query}, null);
     }
   },
 
@@ -390,14 +415,26 @@ const OrganizationStream = createReactClass({
     this.transitionTo({sort});
   },
 
-  onCursorChange(cursor, path, query) {
-    this.transitionTo({cursor});
+  onCursorChange(cursor, path, query, pageDiff) {
+    const queryPageInt = parseInt(query.page, 10);
+    let nextPage = isNaN(queryPageInt) ? pageDiff : queryPageInt + pageDiff;
+
+    // unset cursor and page when we navigate back to the first page
+    // also reset cursor if somehow the previous button is enabled on
+    // first page and user attempts to go backwards
+    if (nextPage <= 0) {
+      cursor = undefined;
+      nextPage = undefined;
+    }
+
+    this.transitionTo({cursor, page: nextPage});
   },
 
   onTagsChange(tags) {
     // Exclude the environment tag as it lives in global search.
+    // Exclude the timestamp tag since we use event.timestamp instead here
     this.setState({
-      tags: omit(tags, 'environment'),
+      tags: omit(tags, ['environment', 'timestamp']),
       tagsLoading: false,
     });
   },
@@ -438,28 +475,32 @@ const OrganizationStream = createReactClass({
    * Returns true if all results in the current query are visible/on this page
    */
   allResultsVisible() {
-    if (!this.state.pageLinks) return false;
+    if (!this.state.pageLinks) {
+      return false;
+    }
 
     const links = parseLinkHeader(this.state.pageLinks);
     return links && !links.previous.results && !links.next.results;
   },
 
-  transitionTo(newParams = {}) {
+  transitionTo(newParams = {}, savedSearch = this.props.savedSearch) {
     const query = {
       ...this.getEndpointParams(),
       ...newParams,
     };
     const {organization} = this.props;
-    const {savedSearch} = this.state;
     let path;
 
-    if (savedSearch && savedSearch.query === query.query) {
+    if (savedSearch && savedSearch.id) {
       path = `/organizations/${organization.slug}/issues/searches/${savedSearch.id}/`;
-      // Drop query and project, adding the search project if available.
-      delete query.query;
-      delete query.project;
 
-      if (savedSearch.projectId) {
+      // Remove the query as saved searches bring their own query string.
+      delete query.query;
+
+      // If we aren't going to another page in the same search
+      // drop the query and replace the current project, with the saved search search project
+      // if available.
+      if (!query.cursor && savedSearch.projectId) {
         query.project = [savedSearch.projectId];
       }
     } else {
@@ -467,11 +508,6 @@ const OrganizationStream = createReactClass({
     }
 
     if (path !== this.props.location.path && !isEqual(query, this.props.location.query)) {
-      // TODO: Delete/revert this after testing production counts cc/ @wedamija
-      if (this.props.location.query[NEW_FILTERS_TEST]) {
-        query[NEW_FILTERS_TEST] = 1;
-      }
-
       browserHistory.push({
         pathname: path,
         query,
@@ -481,7 +517,8 @@ const OrganizationStream = createReactClass({
   },
 
   renderGroupNodes(ids, groupStatsPeriod) {
-    // Restrict this guide to only show for new users (joined<30 days) and add guide anhor only to the first issue
+    // Restrict this guide to only show for new users (joined < 30 days)
+    // and add guide anchor only to the first issue
     const userDateJoined = new Date(ConfigStore.get('user').dateJoined);
     const dateCutoff = new Date();
     dateCutoff.setDate(dateCutoff.getDate() - 30);
@@ -511,7 +548,7 @@ const OrganizationStream = createReactClass({
         />
       );
     });
-    return <PanelBody className="ref-group-list">{groupNodes}</PanelBody>;
+    return <PanelBody>{groupNodes}</PanelBody>;
   },
 
   renderEmpty() {
@@ -553,46 +590,30 @@ const OrganizationStream = createReactClass({
   },
 
   fetchSavedSearches() {
-    const {orgId, searchId} = this.props.params;
     const {organization} = this.props;
-    const projectMap = organization.projects.reduce((acc, project) => {
-      acc[project.id] = project.slug;
-      return acc;
-    }, {});
-
-    fetchSavedSearches(this.api, orgId).then(
-      data => {
-        // Add in project slugs so that we can display them in the picker bars.
-        const savedSearchList = data.map(search => {
-          search.projectSlug = projectMap[search.projectId];
-          return search;
-        });
-
-        const newState = {
-          savedSearchList,
-          savedSearchLoading: false,
-        };
-
-        if (searchId) {
-          const match = savedSearchList.find(search => search.id === searchId);
-          newState.savedSearch = match ? match : null;
-        }
-        this.setState(newState);
-      },
-      error => {
-        logAjaxError(error);
-      }
-    );
+    fetchSavedSearches(this.api, organization.slug).then(data => {}, error => {});
   },
 
-  onSavedSearchCreate(data) {
-    const savedSearchList = this.state.savedSearchList;
+  onSavedSearchCreate(newSavedSearch) {
+    // Navigate to new saved search
+    this.transitionTo(null, newSavedSearch);
+  },
 
-    savedSearchList.push(data);
-    this.setState({
-      savedSearchList: sortBy(savedSearchList, ['name', 'projectId']),
+  onSavedSearchSelect(savedSearch) {
+    this.setState({issuesLoading: true}, () => this.transitionTo(null, savedSearch));
+  },
+
+  onSavedSearchDelete(search) {
+    const {orgId} = this.props.params;
+
+    deleteSavedSearch(this.api, orgId, search).then(() => {
+      this.setState(
+        {
+          issuesLoading: true,
+        },
+        () => this.transitionTo({}, null)
+      );
     });
-    this.setState({savedSearch: data}, this.transitionTo);
   },
 
   renderAwaitingEvents(projects) {
@@ -618,16 +639,16 @@ const OrganizationStream = createReactClass({
   },
 
   render() {
-    if (this.state.savedSearchLoading) {
+    if (this.props.savedSearchLoading) {
       return this.renderLoading();
     }
-    const params = this.props.params;
     const classes = ['stream-row'];
     if (this.state.isSidebarVisible) {
       classes.push('show-sidebar');
     }
-    const {orgId, searchId} = this.props.params;
-    const access = this.getAccess();
+
+    const {params, organization, savedSearch, savedSearches} = this.props;
+    const {selectedProject} = this.state;
     const query = this.getQuery();
 
     // If we have a selected project set release data up
@@ -636,15 +657,13 @@ const OrganizationStream = createReactClass({
     let projectId = null;
     let latestRelease = null;
 
-    const {selectedProject} = this.state;
     const projects = this.getGlobalSearchProjects();
 
     if (selectedProject) {
-      const features = new Set(selectedProject.features);
-      hasReleases = features.has('releases');
+      hasReleases = new Set(selectedProject.features).has('releases');
       latestRelease = selectedProject.latestRelease;
       projectId = selectedProject.slug;
-    } else if (projects.length == 1) {
+    } else if (projects.length === 1) {
       // If the user has filtered down to a single project
       // we can hint the autocomplete/savedsearch picker with that.
       projectId = projects[0].slug;
@@ -654,11 +673,11 @@ const OrganizationStream = createReactClass({
       <div className={classNames(classes)}>
         <div className="stream-content">
           <StreamFilters
-            access={access}
-            orgId={orgId}
+            organization={organization}
             projectId={projectId}
-            searchId={searchId}
+            searchId={params.searchId}
             query={query}
+            savedSearch={savedSearch}
             sort={this.getSort()}
             queryCount={this.state.queryCount}
             queryMaxCount={this.state.queryMaxCount}
@@ -666,15 +685,18 @@ const OrganizationStream = createReactClass({
             onSearch={this.onSearch}
             onSavedSearchCreate={this.onSavedSearchCreate}
             onSavedSearchSelect={this.onSavedSearchSelect}
+            onSavedSearchDelete={this.onSavedSearchDelete}
             onSidebarToggle={this.onSidebarToggle}
             isSearchDisabled={this.state.isSidebarVisible}
-            savedSearchList={this.state.savedSearchList}
+            savedSearchList={savedSearches}
             tagValueLoader={this.tagValueLoader}
+            tags={this.state.tags}
           />
 
           <Panel>
             <StreamActions
-              orgId={params.orgId}
+              organization={organization}
+              orgId={organization.slug}
               projectId={projectId}
               selection={this.props.selection}
               hasReleases={hasReleases}
@@ -703,8 +725,8 @@ const OrganizationStream = createReactClass({
           loading={this.state.tagsLoading}
           tags={this.state.tags}
           query={query}
-          onQueryChange={this.onSearch}
-          orgId={params.orgId}
+          onQueryChange={this.onStreamSidebarSearch}
+          orgId={organization.slug}
           tagValueLoader={this.tagValueLoader}
         />
       </div>
@@ -712,5 +734,7 @@ const OrganizationStream = createReactClass({
   },
 });
 
-export default withGlobalSelection(withOrganization(OrganizationStream));
+export default withSavedSearches(
+  withGlobalSelection(withOrganization(OrganizationStream))
+);
 export {OrganizationStream};
